@@ -1,0 +1,198 @@
+{% comment %}
+Component Template: Métrique #4 — Consommation Totale de Carburant
+(Global total + courbes individuelles par site, la plus haute = site le plus consommateur)
+{% endcomment %}
+
+<div class="card card-glass mb-4 border-0 shadow-sm">
+    <div class="card-header bg-transparent border-0 d-flex flex-wrap align-items-center justify-content-between gap-3 pt-3 px-4">
+        <div class="d-flex align-items-center gap-3">
+            <div class="icon-circle bg-warning bg-opacity-10 text-warning">
+                <i class="bi bi-fuel-pump-fill"></i>
+            </div>
+            <div>
+                <h5 class="mb-0 fw-bold">Métrique #4 — Consommation Totale de Carburant</h5>
+                <p class="text-body-secondary small mb-0">Volume consommé par période : global et par site (delta horaire × L/h).</p>
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-3">
+            <div class="px-3 py-1 bg-body-tertiary border rounded-pill text-center">
+                <span class="extra-small text-body-secondary d-block">Consommation (Dernière Période)</span>
+                <strong class="fs-6 text-warning">{{ consommation_latest_total|floatformat:1 }} L</strong>
+            </div>
+        </div>
+    </div>
+
+    <div class="card-body px-4 pb-4">
+
+        <!-- Summary Stats Row -->
+        <div class="row g-3 mb-4">
+            {% for item in consommation_sites_summary %}
+                <div class="col-12 col-md-4">
+                    <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3 {% if forloop.first %}border-warning{% endif %}">
+                        <div class="icon-circle {% if forloop.first %}bg-warning{% else %}bg-secondary{% endif %} text-white rounded-circle">
+                            <i class="bi bi-fuel-pump"></i>
+                        </div>
+                        <div>
+                            <div class="extra-small text-body-secondary fw-semibold">
+                                {{ item.site.nom_site }}
+                                {% if forloop.first %}
+                                    <span class="badge bg-warning-subtle text-warning ms-1 extra-small">Plus gros consommateur</span>
+                                {% endif %}
+                            </div>
+                            <h5 class="fw-bold mb-0">{{ item.total_consumption|floatformat:1 }} L</h5>
+                            <span class="extra-small text-body-secondary">Pic : {{ item.max_consumption|floatformat:1 }} L/période</span>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="row g-4">
+
+            <!-- Courbe 1 : Consommation Totale (Tous Sites) -->
+            <div class="col-12 col-xl-6">
+                <div class="card bg-body-tertiary border-0 rounded-4 p-3 h-100 shadow-sm">
+                    <div class="d-flex align-items-center justify-content-between border-bottom pb-2 mb-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-graph-down-arrow text-warning fs-5"></i>
+                            <h6 class="mb-0 fw-bold fs-6">Consommation Totale (Tous Sites)</h6>
+                        </div>
+                        <span class="badge bg-warning-subtle text-warning rounded-pill">Cumulé</span>
+                    </div>
+
+                    <div style="position: relative; height: 280px; width: 100%;">
+                        <canvas id="chart-consommation-global"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Courbe 2 : Consommation Individuelle par Site (la plus haute = plus gros consommateur) -->
+            <div class="col-12 col-xl-6">
+                <div class="card bg-body-tertiary border-0 rounded-4 p-3 h-100 shadow-sm">
+                    <div class="d-flex align-items-center justify-content-between border-bottom pb-2 mb-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-activity text-info fs-5"></i>
+                            <h6 class="mb-0 fw-bold fs-6">Consommation Individuelle par Site</h6>
+                        </div>
+                        <span class="badge bg-info-subtle text-info rounded-pill">Par Site</span>
+                    </div>
+
+                    <div style="position: relative; height: 280px; width: 100%;">
+                        <canvas id="chart-consommation-sites"></canvas>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const labels = {{ consommation_labels_json|safe }};
+    const globalData = {{ consommation_global_json|safe }};
+    const sitesDatasets = {{ consommation_sites_series_json|safe }};
+
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    const textColor = isDark ? '#e2e8f0' : '#334155';
+    const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)';
+
+    // Chart 1: Global Consumption Line Chart
+    const ctxGlobal = document.getElementById('chart-consommation-global').getContext('2d');
+
+    const gradientGlobal = ctxGlobal.createLinearGradient(0, 0, 0, 250);
+    gradientGlobal.addColorStop(0, 'rgba(255, 193, 7, 0.35)');
+    gradientGlobal.addColorStop(1, 'rgba(255, 193, 7, 0.0)');
+
+    new Chart(ctxGlobal, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: 'Consommation Totale (L)',
+                data: globalData,
+                borderColor: '#ffc107',
+                backgroundColor: gradientGlobal,
+                borderWidth: 3,
+                tension: 0.35,
+                fill: true,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                pointBackgroundColor: '#ffc107',
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    labels: { color: textColor, font: { family: 'Outfit', size: 12, weight: '600' } }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) { return ' Total: ' + context.parsed.y.toLocaleString('fr-FR') + ' L'; }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: textColor, font: { family: 'Outfit' } },
+                    grid: { color: gridColor }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: textColor,
+                        font: { family: 'Outfit' },
+                        callback: function(val) { return val.toLocaleString('fr-FR') + ' L'; }
+                    },
+                    grid: { color: gridColor }
+                }
+            }
+        }
+    });
+
+    // Chart 2: Per-site Individual Consumption Line Chart
+    const ctxSites = document.getElementById('chart-consommation-sites').getContext('2d');
+    new Chart(ctxSites, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: sitesDatasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { color: textColor, font: { family: 'Outfit', size: 12, weight: '600' } }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return ' ' + context.dataset.label + ': ' + context.parsed.y.toLocaleString('fr-FR') + ' L';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: textColor, font: { family: 'Outfit' } },
+                    grid: { color: gridColor }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: {
+                        color: textColor,
+                        font: { family: 'Outfit' },
+                        callback: function(val) { return val.toLocaleString('fr-FR') + ' L'; }
+                    },
+                    grid: { color: gridColor }
+                }
+            }
+        }
+    });
+});
+</script>

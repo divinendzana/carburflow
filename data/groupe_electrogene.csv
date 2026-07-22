@@ -1,0 +1,4 @@
+id,compteur_horaire,consommation_horaire,marque,puissance
+100,1200.5,15.5,Perkins,250kVA
+101,850.0,22.0,Caterpillar,400kVA
+102,430.2,12.0,Cummins,180kVA

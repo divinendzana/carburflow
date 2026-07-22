@@ -1,0 +1,95 @@
+/* Custom Dashboard Styling & Design System */
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+
+:root {
+    --font-primary: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+body {
+    font-family: var(--font-primary);
+    background-color: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    transition: background-color 0.3s ease, color 0.3s ease;
+    min-height: 100vh;
+}
+
+/* Glassmorphism Card Style */
+.card-glass {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 1rem;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
+}
+
+[data-bs-theme="dark"] .card-glass {
+    background: rgba(26, 34, 52, 0.75);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.card-glass:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.12);
+}
+
+[data-bs-theme="dark"] .card-glass:hover {
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.5);
+}
+
+/* Header & Navbar */
+.navbar-brand img {
+    height: 42px;
+    width: auto;
+    border-radius: 8px;
+    transition: transform 0.3s ease;
+}
+
+.navbar-brand:hover img {
+    transform: scale(1.05);
+}
+
+/* Fuel Tank Meter Progress Bars */
+.tank-progress {
+    height: 14px;
+    border-radius: 10px;
+    background-color: rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+}
+
+[data-bs-theme="dark"] .tank-progress {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.tank-progress-bar {
+    transition: width 1s ease-in-out;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+/* Badges */
+.badge-status {
+    padding: 0.4em 0.8em;
+    font-weight: 500;
+    border-radius: 20px;
+    font-size: 0.8rem;
+}
+
+.extra-small {
+    font-size: 0.75rem;
+}
+
+/* Custom Metric Icon Circle */
+.icon-circle {
+    width: 48px;
+    height: 48px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.4rem;
+}

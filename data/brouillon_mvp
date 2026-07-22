@@ -1,0 +1,158 @@
+Correspondance ETL ↔ Modèle E‑R
+
+    Site
+
+        Table site.csv → attributs id_site, nom_site, localisation  
+        ✔ correspond exactement à l’entité SITE du modèle.
+
+    Cuve principale
+
+        Table cuve_principale.csv → id_cuve_principale, id_site, capacité  
+        ✔ correspond à l’entité CUVE PRINCIPALE, liée au site par FK.
+
+    Cuve journalière
+
+        Table cuve_journaliere.csv → id_cuve_journaliere, id_cuve_principale, capacité  
+        ✔ correspond à l’entité CUVE JOURNALIÈRE, liée à la cuve principale.
+
+    Groupe électrogène
+
+        Table groupe_electrogene.csv → id, compteur_horaire, consommation_horaire, marque, puissance  
+        ✔ correspond à l’entité GROUPE ÉLECTROGÈNE, enrichie avec les attributs fixes (marque, puissance).
+
+    Association cuve journalière ↔ groupe
+
+        Table cuve_journaliere_groupe.csv → id_cuve_journaliere, id_groupe  
+        ✔ correspond à la relation N:N entre cuves journalières et groupes.
+
+    Rapport
+
+        Table rapport.csv → id_rapport, date_debut, date_fin  
+        ✔ correspond à l’entité RAPPORT.
+
+    Ligne de rapport
+
+        Table ligne_rapport.csv → id_ligne, id_rapport, id_cuve_principale, id_cuve_journaliere, id_groupe, quantités, depotage, compteur_horaire, état_fonctionnement, observations  
+        ✔ correspond à l’entité LIGNE DE RAPPORT, qui documente les relevés variables.
+
+
+Très bien, pour ton **MVP Carburflow**, on peut définir un jeu de **routes API REST (api/v1/...)** cohérent avec le modèle E‑R et les fichiers CSV que nous avons validés. Voici une documentation claire du format :
+
+---
+
+# 📡 Documentation API v1 — Carburflow
+
+## Principes généraux
+- Base URL : `/api/v1/`
+- Format : **JSON** (UTF‑8, dates en ISO `AAAA-MM-JJ`, décimales avec point)
+- Authentification : token (Bearer) ou clé API
+- Convention : noms en snake_case, ressources au pluriel
+
+---
+
+## Routes principales
+
+- **Sites**  
+  - `GET /api/v1/sites` → liste des sites  
+  - `POST /api/v1/sites` → créer un site  
+  - `GET /api/v1/sites/{id_site}` → détail d’un site  
+  - **Format JSON :**
+    ```json
+    {
+      "id_site": 1,
+      "nom_site": "BUF Bepanda",
+      "localisation": "Douala"
+    }
+    ```
+
+- **Cuves principales**  
+  - `GET /api/v1/cuves_principales`  
+  - `POST /api/v1/cuves_principales`  
+  - `GET /api/v1/cuves_principales/{id}`  
+  - **Format JSON :**
+    ```json
+    {
+      "id_cuve_principale": 10,
+      "id_site": 1,
+      "capacite": 5000
+    }
+    ```
+
+- **Cuves journalières**  
+  - `GET /api/v1/cuves_journaliere`  
+  - `POST /api/v1/cuves_journaliere`  
+  - `GET /api/v1/cuves_journaliere/{id}`  
+  - **Format JSON :**
+    ```json
+    {
+      "id_cuve_journaliere": 20,
+      "id_cuve_principale": 10,
+      "capacite": 500
+    }
+    ```
+
+- **Groupes électrogènes**  
+  - `GET /api/v1/groupes`  
+  - `POST /api/v1/groupes`  
+  - `GET /api/v1/groupes/{id}`  
+  - **Format JSON :**
+    ```json
+    {
+      "id": 100,
+      "compteur_horaire": 1200,
+      "consommation_horaire": 15.5,
+      "marque": "Perkins",
+      "puissance": "250kVA"
+    }
+    ```
+
+- **Rapports**  
+  - `GET /api/v1/rapports`  
+  - `POST /api/v1/rapports`  
+  - `GET /api/v1/rapports/{id}`  
+  - **Format JSON :**
+    ```json
+    {
+      "id_rapport": 300,
+      "date_debut": "2026-07-01",
+      "date_fin": "2026-07-07"
+    }
+    ```
+
+- **Lignes de rapport**  
+  - `GET /api/v1/lignes_rapport`  
+  - `POST /api/v1/lignes_rapport`  
+  - `GET /api/v1/lignes_rapport/{id}`  
+  - **Format JSON :**
+    ```json
+    {
+      "id_ligne": 500,
+      "id_rapport": 300,
+      "id_cuve_principale": 10,
+      "id_cuve_journaliere": 20,
+      "id_groupe": 100,
+      "quantite_gasoil_cuve_principale": 4500,
+      "quantite_gasoil_cuve_journaliere": 300,
+      "compteur_horaire": 1210,
+      "depotage" : 0,
+      "etat_fonctionnement": "F",
+      "observations": "RAS"
+    }
+    ```
+
+---
+
+## Routes analytiques (dashboard)
+
+- **État des cuves** → `GET /api/v1/dashboard/etat_cuves?site={id}`  
+- **Évolution des volumes** → `GET /api/v1/dashboard/evolution_volumes?site={id}&periode=...`  
+- **Historique consommation** → `GET /api/v1/dashboard/consommation?site={id}`  
+- **Historique horaires groupes** → `GET /api/v1/dashboard/horaires_groupes?site={id}`  
+- **Volume total** → `GET /api/v1/dashboard/volume_total`  
+- **Horaire total** → `GET /api/v1/dashboard/horaire_total`  
+- **Consommation moyenne** → `GET /api/v1/dashboard/consommation_moyenne?site={id}`  
+
+---
+
+👉 Avec ce découpage, tu as une **API RESTful claire et extensible**.  
+Souhaites‑tu que je te propose aussi une **documentation Swagger/OpenAPI** (YAML/JSON) pour générer automatiquement la doc interactive et les tests d’API ?

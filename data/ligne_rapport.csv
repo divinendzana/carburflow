@@ -1,0 +1,10 @@
+id_ligne,id_rapport,id_cuve_principale,id_cuve_journaliere,id_groupe,quantite_gasoil_cuve_principale,quantite_gasoil_cuve_journaliere,compteur_horaire,depotage,etat_fonctionnement,observations
+500,300,10,20,100,12000,850,1210.5,0,F,RAS - Remplissage normal
+501,300,10,21,100,12000,600,1210.5,0,F,RAS
+502,301,11,22,101,18000,1200,865.0,2000,F,Depotage de 2000L effectue le 09/07
+503,302,10,20,100,11000,800,1225.0,0,F,RAS
+504,302,11,22,101,16500,1100,880.0,0,F,Consommation régulière
+505,302,12,23,102,8500,500,445.0,0,F,RAS
+506,303,10,20,100,14000,900,1240.0,3000,F,Livraison gasoil 3000L
+507,303,11,22,101,15000,950,895.0,0,F,RAS
+508,303,12,23,102,7800,450,460.0,0,F,RAS

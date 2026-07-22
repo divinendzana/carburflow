@@ -1,0 +1,54 @@
+{% extends 'dashboard/base.html' %}
+{% load static %}
+
+{% block title %}Dashboard General - CarburFlow{% endblock %}
+
+{% block content %}
+<div class="row align-items-center mb-4">
+    <div class="col">
+        <h2 class="fw-bold mb-1">Tableau de Bord Général</h2>
+        <p class="text-body-secondary mb-0">Vue synthétique des métriques et indicateurs clés de suivi du carburant.</p>
+    </div>
+    <div class="col-auto">
+        <button class="btn btn-primary rounded-pill px-4 shadow-sm" onclick="window.location.reload();">
+            <i class="bi bi-arrow-clockwise me-1"></i> Actualiser
+        </button>
+    </div>
+</div>
+
+<!-- Component 1: Fuel Tank Levels (États des Cuves Principales & Journalières) -->
+{% include 'dashboard/components/etat_cuves.html' %}
+
+<!-- Component 2: Volume Evolution Trends (Volume Total Global & par Site) -->
+{% include 'dashboard/components/evolution_volumes.html' %}
+
+<!-- Component 3: Horaires de Fonctionnement des Groupes Électrogènes -->
+{% include 'dashboard/components/horaires_groupes.html' %}
+
+<!-- Component 4: Consommation Totale de Carburant -->
+{% include 'dashboard/components/consommation_carburant.html' %}
+
+<!-- Placeholder for future components -->
+<div class="row g-4 mt-2">
+    <div class="col-12 col-md-6 col-xl-6">
+        <div class="card card-glass p-4 text-center border-dashed">
+            <div class="icon-circle bg-info bg-opacity-10 text-info mx-auto mb-3">
+                <i class="bi bi-truck"></i>
+            </div>
+            <h6 class="fw-bold mb-1">Historique des Dépotages & Livraisons</h6>
+            <p class="text-body-secondary small mb-3">Suivi détaillé des volumes dépotés par site.</p>
+            <span class="badge bg-secondary-subtle text-secondary rounded-pill">Composant à venir</span>
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-6">
+        <div class="card card-glass p-4 text-center border-dashed">
+            <div class="icon-circle bg-purple bg-opacity-10 text-secondary mx-auto mb-3">
+                <i class="bi bi-bell-fill"></i>
+            </div>
+            <h6 class="fw-bold mb-1">Alertes & Notifications</h6>
+            <p class="text-body-secondary small mb-3">Seuils critiques, anomalies et rappels automatiques.</p>
+            <span class="badge bg-secondary-subtle text-secondary rounded-pill">Composant à venir</span>
+        </div>
+    </div>
+</div>
+{% endblock %}

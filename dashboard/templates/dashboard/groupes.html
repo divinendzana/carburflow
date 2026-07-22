@@ -1,0 +1,353 @@
+{% extends 'dashboard/base.html' %}
+{% load static %}
+
+{% block title %}Groupes Électrogènes - CarburFlow{% endblock %}
+
+{% block extra_head %}
+<style>
+    .stat-card { border-radius: 1rem; transition: transform 0.2s ease; }
+    .stat-card:hover { transform: translateY(-2px); }
+    .variation-up { color: #dc3545; }
+    .variation-down { color: #198754; }
+    .variation-neutral { color: #6c757d; }
+    .filter-bar .form-select, .filter-bar .form-label { font-size: 0.85rem; }
+    .groupe-block { border-left: 4px solid var(--groupe-color, #0d6efd); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row align-items-center mb-4">
+    <div class="col">
+        <h2 class="fw-bold mb-1">Groupes Électrogènes</h2>
+        <p class="text-body-secondary mb-0">Analyse par site et par groupe — horaires et consommation sur la période choisie.</p>
+    </div>
+    <div class="col-auto d-flex gap-2 flex-wrap">
+        <span class="badge bg-info-subtle text-info border border-info-subtle px-3 py-2 rounded-pill">
+            <i class="bi bi-geo-alt me-1"></i> {{ selected_site.nom_site }}
+        </span>
+        <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2 rounded-pill">
+            <i class="bi bi-calendar-range me-1"></i> {{ period_label }}
+        </span>
+        {% if previous_period_label %}
+        <span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle px-3 py-2 rounded-pill">
+            <i class="bi bi-arrow-left me-1"></i> Préc. : {{ previous_period_label }}
+        </span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Filtres -->
+<div class="card card-glass mb-4 border-0 shadow-sm">
+    <div class="card-body px-4 py-3">
+        <form method="get" class="row g-3 align-items-end filter-bar">
+            <div class="col-12 col-md-3">
+                <label for="rapport_debut" class="form-label fw-semibold mb-1">
+                    <i class="bi bi-calendar-event me-1"></i> Rapport début
+                </label>
+                <select name="rapport_debut" id="rapport_debut" class="form-select form-select-sm">
+                    {% for r in rapport_choices %}
+                        <option value="{{ r.id }}" {% if r.id == selected_rapport_debut %}selected{% endif %}>{{ r.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-3">
+                <label for="rapport_fin" class="form-label fw-semibold mb-1">
+                    <i class="bi bi-calendar-check me-1"></i> Rapport fin
+                </label>
+                <select name="rapport_fin" id="rapport_fin" class="form-select form-select-sm">
+                    {% for r in rapport_choices %}
+                        <option value="{{ r.id }}" {% if r.id == selected_rapport_fin %}selected{% endif %}>{{ r.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-3">
+                <label for="site_id" class="form-label fw-semibold mb-1">
+                    <i class="bi bi-geo-alt me-1"></i> Site
+                </label>
+                <select name="site_id" id="site_id" class="form-select form-select-sm">
+                    {% for site in sites %}
+                        <option value="{{ site.id }}" {% if site.id == selected_site_id %}selected{% endif %}>{{ site.nom_site }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-12 col-md-3">
+                <button type="submit" class="btn btn-primary btn-sm rounded-pill w-100">
+                    <i class="bi bi-funnel me-1"></i> Appliquer les filtres
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Métriques globales du site filtré -->
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <h6 class="text-body-secondary fw-semibold text-uppercase extra-small mb-2">
+            <i class="bi bi-building me-1"></i> Métriques globales — {{ selected_site.nom_site }}
+        </h6>
+    </div>
+
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="card stat-card bg-body-tertiary border-0 h-100 p-3">
+            <div class="extra-small text-body-secondary fw-semibold mb-1">Horaires — Total période</div>
+            <h4 class="fw-bold mb-1 text-danger">{{ site_hours_stats.total|floatformat:1 }} h</h4>
+            {% include 'dashboard/components/_variation_badge.html' with variation=site_hours_stats.variation_pct previous_total=site_hours_stats.previous_total unit='h' %}
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="card stat-card bg-body-tertiary border-0 h-100 p-3">
+            <div class="extra-small text-body-secondary fw-semibold mb-1">Horaires — Moyenne / période</div>
+            <h4 class="fw-bold mb-1 text-danger">{{ site_hours_stats.mean|floatformat:1 }} h</h4>
+            <span class="extra-small text-body-secondary">Moy. par rapport dans la fenêtre</span>
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="card stat-card bg-body-tertiary border-0 h-100 p-3">
+            <div class="extra-small text-body-secondary fw-semibold mb-1">Consommation — Total période</div>
+            <h4 class="fw-bold mb-1 text-warning">{{ site_consumption_stats.total|floatformat:1 }} L</h4>
+            {% include 'dashboard/components/_variation_badge.html' with variation=site_consumption_stats.variation_pct previous_total=site_consumption_stats.previous_total unit='L' %}
+        </div>
+    </div>
+    <div class="col-12 col-md-6 col-xl-3">
+        <div class="card stat-card bg-body-tertiary border-0 h-100 p-3">
+            <div class="extra-small text-body-secondary fw-semibold mb-1">Consommation — Moyenne / période</div>
+            <h4 class="fw-bold mb-1 text-warning">{{ site_consumption_stats.mean|floatformat:1 }} L</h4>
+            <span class="extra-small text-body-secondary">Moy. par rapport dans la fenêtre</span>
+        </div>
+    </div>
+</div>
+
+<!-- Moyennes absolues site -->
+<div class="row g-3 mb-4">
+    <div class="col-12">
+        <h6 class="text-body-secondary fw-semibold text-uppercase extra-small mb-2">
+            <i class="bi bi-infinity me-1"></i> Moyennes absolues — {{ selected_site.nom_site }} (depuis le 1<sup>er</sup> rapport)
+        </h6>
+    </div>
+    <div class="col-12 col-md-6">
+        <div class="card stat-card bg-body-tertiary border border-secondary border-opacity-25 h-100 p-3 text-center">
+            <div class="extra-small text-body-secondary fw-semibold">Horaires moyens / période</div>
+            <h5 class="fw-bold text-danger mb-0">{{ site_hours_stats.all_time_mean|floatformat:1 }} h</h5>
+        </div>
+    </div>
+    <div class="col-12 col-md-6">
+        <div class="card stat-card bg-body-tertiary border border-secondary border-opacity-25 h-100 p-3 text-center">
+            <div class="extra-small text-body-secondary fw-semibold">Consommation moyenne / période</div>
+            <h5 class="fw-bold text-warning mb-0">{{ site_consumption_stats.all_time_mean|floatformat:1 }} L</h5>
+        </div>
+    </div>
+</div>
+
+<!-- Blocs par groupe individuel -->
+<div class="row g-4">
+    <div class="col-12">
+        <h6 class="text-body-secondary fw-semibold text-uppercase extra-small mb-0">
+            <i class="bi bi-cpu me-1"></i> Détail par groupe — {{ selected_site.nom_site }}
+        </h6>
+    </div>
+
+    {% for block in group_blocks %}
+    <div class="col-12">
+        <div class="card card-glass border-0 shadow-sm groupe-block" style="--groupe-color: {{ block.color }};">
+            <div class="card-header bg-transparent border-0 pt-3 px-4">
+                <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="icon-circle bg-opacity-10 rounded-circle" style="background-color: {{ block.color }}33; color: {{ block.color }};">
+                            <i class="bi bi-lightning-charge-fill"></i>
+                        </div>
+                        <div>
+                            <h5 class="mb-0 fw-bold">{{ block.label }}</h5>
+                            <span class="extra-small text-body-secondary">{{ block.rate|floatformat:1 }} L/h — {{ block.marque }} {{ block.puissance }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body px-4 pb-4">
+                <!-- Stats horaires du groupe -->
+                <div class="row g-2 mb-3">
+                    <div class="col-12">
+                        <span class="badge bg-danger-subtle text-danger extra-small fw-semibold">Horaires de fonctionnement</span>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 bg-body-tertiary rounded-3 text-center h-100">
+                            <div class="extra-small text-body-secondary">Total période</div>
+                            <strong class="text-danger">{{ block.hours_stats.total|floatformat:1 }} h</strong>
+                            {% include 'dashboard/components/_variation_badge.html' with variation=block.hours_stats.variation_pct previous_total=block.hours_stats.previous_total unit='h' %}
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 bg-body-tertiary rounded-3 text-center h-100">
+                            <div class="extra-small text-body-secondary">Moyenne</div>
+                            <strong class="text-danger">{{ block.hours_stats.mean|floatformat:1 }} h</strong>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 bg-body-tertiary rounded-3 text-center h-100">
+                            <div class="extra-small text-body-secondary">Total période préc.</div>
+                            <strong class="text-danger">{% if block.hours_stats.previous_total != None %}{{ block.hours_stats.previous_total|floatformat:1 }} h{% else %}—{% endif %}</strong>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 bg-body-tertiary rounded-3 text-center h-100">
+                            <div class="extra-small text-body-secondary">Moy. absolue</div>
+                            <strong class="text-danger">{{ block.hours_stats.all_time_mean|floatformat:1 }} h</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Stats consommation du groupe -->
+                <div class="row g-2 mb-4">
+                    <div class="col-12">
+                        <span class="badge bg-warning-subtle text-warning extra-small fw-semibold">Consommation carburant</span>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 bg-body-tertiary rounded-3 text-center h-100">
+                            <div class="extra-small text-body-secondary">Total période</div>
+                            <strong class="text-warning">{{ block.consumption_stats.total|floatformat:1 }} L</strong>
+                            {% include 'dashboard/components/_variation_badge.html' with variation=block.consumption_stats.variation_pct previous_total=block.consumption_stats.previous_total unit='L' %}
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 bg-body-tertiary rounded-3 text-center h-100">
+                            <div class="extra-small text-body-secondary">Moyenne</div>
+                            <strong class="text-warning">{{ block.consumption_stats.mean|floatformat:1 }} L</strong>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 bg-body-tertiary rounded-3 text-center h-100">
+                            <div class="extra-small text-body-secondary">Total période préc.</div>
+                            <strong class="text-warning">{% if block.consumption_stats.previous_total != None %}{{ block.consumption_stats.previous_total|floatformat:1 }} L{% else %}—{% endif %}</strong>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <div class="p-2 bg-body-tertiary rounded-3 text-center h-100">
+                            <div class="extra-small text-body-secondary">Moy. absolue</div>
+                            <strong class="text-warning">{{ block.consumption_stats.all_time_mean|floatformat:1 }} L</strong>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Courbes du groupe -->
+                <div class="row g-3">
+                    <div class="col-12 col-md-6">
+                        <div class="extra-small text-body-secondary fw-semibold mb-2">Courbe des heures de fonctionnement (écarts)</div>
+                        <div style="position: relative; height: 200px;">
+                            <canvas id="chart-groupe-{{ block.id }}-horaires"></canvas>
+                        </div>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <div class="extra-small text-body-secondary fw-semibold mb-2">Courbe consommation (L/période)</div>
+                        <div style="position: relative; height: 200px;">
+                            <canvas id="chart-groupe-{{ block.id }}-conso"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% empty %}
+    <div class="col-12">
+        <div class="card card-glass p-4 text-center text-body-secondary">
+            <i class="bi bi-info-circle fs-4 mb-2"></i>
+            <p class="mb-0">Aucun groupe électrogène rattaché à ce site.</p>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const labels = {{ chart_labels_json|safe }};
+
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    const textColor = isDark ? '#e2e8f0' : '#334155';
+    const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)';
+
+    const baseOptions = (unit, beginZero) => ({
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { display: false },
+            tooltip: {
+                callbacks: {
+                    label: function(ctx) {
+                        return ' ' + ctx.parsed.y.toLocaleString('fr-FR') + ' ' + unit;
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                ticks: { color: textColor, font: { family: 'Outfit', size: 10 } },
+                grid: { color: gridColor }
+            },
+            y: {
+                beginAtZero: beginZero,
+                ticks: {
+                    color: textColor,
+                    font: { family: 'Outfit', size: 10 },
+                    callback: function(v) { return v.toLocaleString('fr-FR') + ' ' + unit; }
+                },
+                grid: { color: gridColor }
+            }
+        }
+    });
+
+    const groupBlocks = [
+        {% for block in group_blocks %}
+        {
+            id: {{ block.id }},
+            color: '{{ block.color }}',
+            label: '{{ block.label|escapejs }}',
+            consumption: {{ block.consumption_json|safe }},
+            hoursRun: {{ block.hours_run_json|safe }},
+        }{% if not forloop.last %},{% endif %}
+        {% endfor %}
+    ];
+
+    groupBlocks.forEach(function(block) {
+        const ctxH = document.getElementById('chart-groupe-' + block.id + '-horaires');
+        if (ctxH) {
+            new Chart(ctxH.getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: block.label,
+                        data: block.hoursRun,
+                        borderColor: block.color,
+                        backgroundColor: block.color + '20',
+                        borderWidth: 2,
+                        tension: 0.35,
+                        fill: true,
+                        pointRadius: 4,
+                    }]
+                },
+                options: baseOptions('h', false)
+            });
+        }
+
+        const ctxC = document.getElementById('chart-groupe-' + block.id + '-conso');
+        if (ctxC) {
+            new Chart(ctxC.getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Consommation',
+                        data: block.consumption,
+                        backgroundColor: block.color + '99',
+                        borderColor: block.color,
+                        borderWidth: 1,
+                        borderRadius: 4,
+                    }]
+                },
+                options: baseOptions('L', true)
+            });
+        }
+    });
+});
+</script>
+{% endblock %}

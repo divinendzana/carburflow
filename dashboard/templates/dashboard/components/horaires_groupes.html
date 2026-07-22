@@ -1,0 +1,238 @@
+{% comment %}
+Component Template: Métrique #3 — Horaires de Fonctionnement des Groupes Électrogènes
+(Global total + par site filtrable, avec par défaut le site ayant le plus gros horaire)
+{% endcomment %}
+
+<div class="card card-glass mb-4 border-0 shadow-sm">
+    <div class="card-header bg-transparent border-0 d-flex flex-wrap align-items-center justify-content-between gap-3 pt-3 px-4">
+        <div class="d-flex align-items-center gap-3">
+            <div class="icon-circle bg-danger bg-opacity-10 text-danger">
+                <i class="bi bi-cpu-fill"></i>
+            </div>
+            <div>
+                <h5 class="mb-0 fw-bold">Métrique #3 — Horaires de Fonctionnement des Groupes</h5>
+                <p class="text-body-secondary small mb-0">Suivi des compteurs horaires (horamètres) : global et par site individuel.</p>
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-3">
+            <div class="px-3 py-1 bg-body-tertiary border rounded-pill text-center">
+                <span class="extra-small text-body-secondary d-block">Total Horaires (Dernier Rapport)</span>
+                <strong class="fs-6 text-danger">{{ horaires_latest_total|floatformat:1 }} h</strong>
+            </div>
+        </div>
+    </div>
+
+    <div class="card-body px-4 pb-4">
+
+        <!-- Summary Stats Row -->
+        <div class="row g-3 mb-4">
+            {% for item in horaires_sites_summary %}
+                <div class="col-12 col-md-4">
+                    <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3 {% if item.site.id == horaires_default_site_id %}border-danger{% endif %}">
+                        <div class="icon-circle {% if item.site.id == horaires_default_site_id %}bg-danger{% else %}bg-secondary{% endif %} text-white rounded-circle">
+                            <i class="bi bi-clock-history"></i>
+                        </div>
+                        <div>
+                            <div class="extra-small text-body-secondary fw-semibold">
+                                {{ item.site.nom_site }}
+                                {% if item.site.id == horaires_default_site_id %}
+                                    <span class="badge bg-danger-subtle text-danger ms-1 extra-small">Plus gros horaire</span>
+                                {% endif %}
+                            </div>
+                            <h5 class="fw-bold mb-0">{{ item.total_hours|floatformat:1 }} h</h5>
+                            <span class="extra-small text-body-secondary">{{ item.groupes_count }} groupe(s)</span>
+                        </div>
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+
+        <div class="row g-4">
+            
+            <!-- Graphique 1 (Gauche) : Horaires globales (somme de tous les groupes) -->
+            <div class="col-12 col-xl-6">
+                <div class="card bg-body-tertiary border-0 rounded-4 p-3 h-100 shadow-sm">
+                    <div class="d-flex align-items-center justify-content-between border-bottom pb-2 mb-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-clock-fill text-danger fs-5"></i>
+                            <h6 class="mb-0 fw-bold fs-6">Horaires Globales (Tous Groupes)</h6>
+                        </div>
+                        <span class="badge bg-danger-subtle text-danger rounded-pill">Cumulé</span>
+                    </div>
+
+                    <div style="position: relative; height: 280px; width: 100%;">
+                        <canvas id="chart-horaires-global"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Graphique 2 (Droite) : Horaires par Site (filtrable) -->
+            <div class="col-12 col-xl-6">
+                <div class="card bg-body-tertiary border-0 rounded-4 p-3 h-100 shadow-sm">
+                    <div class="d-flex align-items-center justify-content-between border-bottom pb-2 mb-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-activity text-info fs-5"></i>
+                            <h6 class="mb-0 fw-bold fs-6">Horaires par Groupe (Filtre par Site)</h6>
+                        </div>
+                    </div>
+
+                    <!-- Sélecteur de Site -->
+                    <div class="mb-2">
+                        <div class="nav nav-pills flex-nowrap overflow-auto gap-2 pb-2" id="horaires-site-pills" role="tablist">
+                            {% for item in horaires_sites_summary %}
+                                <button class="nav-link btn-sm rounded-pill text-nowrap {% if item.site.id == horaires_default_site_id %}active{% endif %}" 
+                                        type="button" 
+                                        onclick="updateHorairesSiteChart({{ item.site.id }}, this)">
+                                    <i class="bi bi-geo-alt me-1"></i> {{ item.site.nom_site }}
+                                    {% if item.site.id == horaires_default_site_id %}
+                                        <span class="badge bg-danger rounded-circle ms-1" title="Plus gros horaire">!</span>
+                                    {% endif %}
+                                </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div style="position: relative; height: 240px; width: 100%;">
+                        <canvas id="chart-horaires-site"></canvas>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const horaireLabels = {{ horaires_labels_json|safe }};
+    const globalHours = {{ horaires_global_json|safe }};
+    const sitesHorairesData = {{ horaires_sites_data_json|safe }};
+    let activeHoraireSiteId = {{ horaires_default_site_id }};
+
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    const textColor = isDark ? '#e2e8f0' : '#334155';
+    const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)';
+
+    // Chart 1: Global Hours Line Chart
+    const ctxGlobalH = document.getElementById('chart-horaires-global').getContext('2d');
+    
+    const gradientH = ctxGlobalH.createLinearGradient(0, 0, 0, 250);
+    gradientH.addColorStop(0, 'rgba(220, 53, 69, 0.3)');
+    gradientH.addColorStop(1, 'rgba(220, 53, 69, 0.0)');
+
+    new Chart(ctxGlobalH, {
+        type: 'line',
+        data: {
+            labels: horaireLabels,
+            datasets: [{
+                label: 'Total Compteur Horaire (h)',
+                data: globalHours,
+                borderColor: '#dc3545',
+                backgroundColor: gradientH,
+                borderWidth: 3,
+                tension: 0.35,
+                fill: true,
+                pointRadius: 5,
+                pointHoverRadius: 7,
+                pointBackgroundColor: '#dc3545',
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    labels: { color: textColor, font: { family: 'Outfit', size: 12, weight: '600' } }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return ' Total: ' + context.parsed.y.toLocaleString('fr-FR') + ' h';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: textColor, font: { family: 'Outfit' } },
+                    grid: { color: gridColor }
+                },
+                y: {
+                    beginAtZero: false,
+                    ticks: {
+                        color: textColor,
+                        font: { family: 'Outfit' },
+                        callback: function(val) { return val.toLocaleString('fr-FR') + ' h'; }
+                    },
+                    grid: { color: gridColor }
+                }
+            }
+        }
+    });
+
+    // Chart 2: Per-site Grouped Generators Line Chart
+    const ctxSiteH = document.getElementById('chart-horaires-site').getContext('2d');
+
+    function getSiteDatasets(siteId) {
+        const siteObj = sitesHorairesData[siteId];
+        return siteObj ? siteObj.datasets : [];
+    }
+
+    const initialDatasets = getSiteDatasets(activeHoraireSiteId);
+
+    window.chartHorairesSite = new Chart(ctxSiteH, {
+        type: 'line',
+        data: {
+            labels: horaireLabels,
+            datasets: initialDatasets,
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { color: textColor, font: { family: 'Outfit', size: 12, weight: '600' } }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            return ' ' + context.dataset.label + ': ' + context.parsed.y.toLocaleString('fr-FR') + ' h';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: textColor, font: { family: 'Outfit' } },
+                    grid: { color: gridColor }
+                },
+                y: {
+                    beginAtZero: false,
+                    ticks: {
+                        color: textColor,
+                        font: { family: 'Outfit' },
+                        callback: function(val) { return val.toLocaleString('fr-FR') + ' h'; }
+                    },
+                    grid: { color: gridColor }
+                }
+            }
+        }
+    });
+
+    window.updateHorairesSiteChart = function(siteId, btnEl) {
+        activeHoraireSiteId = siteId;
+        const newDatasets = getSiteDatasets(siteId);
+        
+        window.chartHorairesSite.data.datasets = newDatasets;
+        window.chartHorairesSite.update();
+
+        // Update pill active state
+        document.querySelectorAll('#horaires-site-pills button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        if (btnEl) btnEl.classList.add('active');
+    };
+});
+</script>

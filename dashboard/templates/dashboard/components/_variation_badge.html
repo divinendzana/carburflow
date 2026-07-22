@@ -1,0 +1,20 @@
+{% if variation is not None %}
+    {% if variation > 0 %}
+        <span class="extra-small variation-up fw-semibold d-block">
+            <i class="bi bi-arrow-up-short"></i> +{{ variation|floatformat:1 }}% vs période préc.
+        </span>
+    {% elif variation < 0 %}
+        <span class="extra-small variation-down fw-semibold d-block">
+            <i class="bi bi-arrow-down-short"></i> {{ variation|floatformat:1 }}% vs période préc.
+        </span>
+    {% else %}
+        <span class="extra-small variation-neutral fw-semibold d-block">
+            <i class="bi bi-dash"></i> 0% vs période préc.
+        </span>
+    {% endif %}
+    {% if previous_total != None and unit %}
+        <span class="extra-small text-body-secondary">({{ previous_total|floatformat:1 }} {{ unit }} avant)</span>
+    {% endif %}
+{% else %}
+    <span class="extra-small variation-neutral">— pas de période précédente</span>
+{% endif %}

@@ -1,0 +1,257 @@
+{% comment %}
+Component Template: Métrique #1 — Niveaux des Cuves Principales & Journalières (Graphiques Visuels Chart.js)
+{% endcomment %}
+
+<div class="card card-glass mb-4 border-0 shadow-sm">
+    <div class="card-header bg-transparent border-0 d-flex flex-wrap align-items-center justify-content-between gap-3 pt-3 px-4">
+        <div class="d-flex align-items-center gap-3">
+            <div class="icon-circle bg-primary bg-opacity-10 text-primary">
+                <i class="bi bi-fuel-pump-fill"></i>
+            </div>
+            <div>
+                <h5 class="mb-0 fw-bold">Métrique #1 — Niveaux de Remplissage des Cuves</h5>
+                <p class="text-body-secondary small mb-0">
+                    {% if latest_rapport %}
+                        Basé sur le dernier rapport <strong>#{{ latest_rapport.id }}</strong> (du {{ latest_rapport.date_debut|date:"d/m/Y" }} au {{ latest_rapport.date_fin|date:"d/m/Y" }})
+                    {% else %}
+                        <span class="text-warning"><i class="bi bi-exclamation-triangle-fill me-1"></i> Aucun rapport disponible</span>
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-3">
+            <div class="px-3 py-1 bg-body-tertiary border rounded-pill text-center">
+                <span class="extra-small text-body-secondary d-block">Taux de Remplissage Global</span>
+                <strong class="fs-6 text-primary">{{ global_pct }}%</strong>
+            </div>
+        </div>
+    </div>
+
+    <div class="card-body px-4 pb-4">
+        
+        <!-- Summary Stats Row -->
+        <div class="row g-3 mb-4">
+            <div class="col-12 col-md-4">
+                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
+                    <div class="icon-circle bg-primary text-white rounded-circle">
+                        <i class="bi bi-droplet-half"></i>
+                    </div>
+                    <div>
+                        <div class="extra-small text-body-secondary fw-semibold">Volume Total Stocké</div>
+                        <h5 class="fw-bold mb-0">{{ total_volume_global|floatformat:1 }} L</h5>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
+                    <div class="icon-circle bg-secondary text-white rounded-circle">
+                        <i class="bi bi-box-seam"></i>
+                    </div>
+                    <div>
+                        <div class="extra-small text-body-secondary fw-semibold">Capacité Totale Cuves</div>
+                        <h5 class="fw-bold mb-0">{{ total_capacity_global|floatformat:1 }} L</h5>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
+                    <div class="icon-circle {% if global_pct >= 50 %}bg-success{% elif global_pct >= 20 %}bg-warning{% else %}bg-danger{% endif %} text-white rounded-circle">
+                        <i class="bi bi-speedometer"></i>
+                    </div>
+                    <div>
+                        <div class="extra-small text-body-secondary fw-semibold">Statut Général</div>
+                        <h5 class="fw-bold mb-0">
+                            {% if global_pct >= 50 %}Optimal{% elif global_pct >= 20 %}Vigilance{% else %}Critique{% endif %}
+                        </h5>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-4">
+            
+            <!-- Graphique 1 (Gauche) : Niveau des Cuves Principales (%) -->
+            <div class="col-12 col-xl-6">
+                <div class="card bg-body-tertiary border-0 rounded-4 p-3 h-100 shadow-sm">
+                    <div class="d-flex align-items-center justify-content-between border-bottom pb-2 mb-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-bar-chart-line-fill text-primary fs-5"></i>
+                            <h6 class="mb-0 fw-bold fs-6">Cuves Principales (% de Remplissage)</h6>
+                        </div>
+                        <span class="badge bg-primary-subtle text-primary rounded-pill">Triées par niveau</span>
+                    </div>
+
+                    <div style="position: relative; height: 260px; width: 100%;">
+                        <canvas id="chart-cp-levels"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Graphique 2 (Droite) : Niveau des Cuves Journalières par Site (%) -->
+            <div class="col-12 col-xl-6">
+                <div class="card bg-body-tertiary border-0 rounded-4 p-3 h-100 shadow-sm">
+                    <div class="d-flex align-items-center justify-content-between border-bottom pb-2 mb-3">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-diagram-3-fill text-warning fs-5"></i>
+                            <h6 class="mb-0 fw-bold fs-6">Cuves Journalières par Site</h6>
+                        </div>
+                    </div>
+
+                    <!-- Sélecteur de Site pour le graphique -->
+                    <div class="mb-2">
+                        <div class="nav nav-pills flex-nowrap overflow-auto gap-2 pb-2" id="site-chart-pills" role="tablist">
+                            {% for item in sites_summary %}
+                                <button class="nav-link btn-sm rounded-pill text-nowrap {% if item.site.id == active_site_id %}active{% endif %}" 
+                                        type="button" 
+                                        onclick="updateCJChart({{ item.site.id }})">
+                                    <i class="bi bi-geo-alt me-1"></i> {{ item.site.nom_site }}
+                                </button>
+                            {% endfor %}
+                        </div>
+                    </div>
+
+                    <div style="position: relative; height: 220px; width: 100%;">
+                        <canvas id="chart-cj-levels"></canvas>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const cpLabels = {{ cp_chart_labels_json|safe }};
+    const cpPcts = {{ cp_chart_pcts_json|safe }};
+    const cpColors = {{ cp_chart_colors_json|safe }};
+    const cpQuantities = {{ cp_chart_quantities_json|safe }};
+
+    const sitesCJData = {{ sites_cj_chart_json|safe }};
+    let activeSiteId = {{ active_site_id|default:1 }};
+
+    const isDark = document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    const textColor = isDark ? '#e2e8f0' : '#334155';
+    const gridColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.06)';
+
+    // Chart 1: Cuves Principales Horizontal Bar Chart
+    const ctxCP = document.getElementById('chart-cp-levels').getContext('2d');
+    new Chart(ctxCP, {
+        type: 'bar',
+        data: {
+            labels: cpLabels,
+            datasets: [{
+                label: 'Niveau (%)',
+                data: cpPcts,
+                backgroundColor: cpColors,
+                borderRadius: 8,
+                barThickness: 24,
+            }]
+        },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const idx = context.dataIndex;
+                            return ' Niveau: ' + context.parsed.x + '% (' + cpQuantities[idx].toLocaleString('fr-FR') + ' L)';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    min: 0,
+                    max: 100,
+                    ticks: { color: textColor, font: { family: 'Outfit' }, callback: function(v) { return v + '%'; } },
+                    grid: { color: gridColor }
+                },
+                y: {
+                    ticks: { color: textColor, font: { family: 'Outfit', weight: '600' } },
+                    grid: { display: false }
+                }
+            }
+        }
+    });
+
+    // Chart 2: Cuves Journalières Bar Chart (Filtered by Site)
+    const ctxCJ = document.getElementById('chart-cj-levels').getContext('2d');
+    
+    function getCJDataset(siteId) {
+        const dataObj = sitesCJData[siteId] || { labels: [], percentages: [], colors: [], quantities: [] };
+        return {
+            labels: dataObj.labels,
+            percentages: dataObj.percentages,
+            colors: dataObj.colors,
+            quantities: dataObj.quantities,
+        };
+    }
+
+    const initialCJ = getCJDataset(activeSiteId);
+
+    window.chartCJ = new Chart(ctxCJ, {
+        type: 'bar',
+        data: {
+            labels: initialCJ.labels,
+            datasets: [{
+                label: 'Niveau (%)',
+                data: initialCJ.percentages,
+                backgroundColor: initialCJ.colors,
+                borderRadius: 8,
+                barThickness: 26,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const siteObj = sitesCJData[activeSiteId];
+                            const qty = siteObj && siteObj.quantities ? siteObj.quantities[context.dataIndex] : 0;
+                            return ' Niveau: ' + context.parsed.y + '% (' + qty.toLocaleString('fr-FR') + ' L)';
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: textColor, font: { family: 'Outfit', weight: '600' } },
+                    grid: { display: false }
+                },
+                y: {
+                    min: 0,
+                    max: 100,
+                    ticks: { color: textColor, font: { family: 'Outfit' }, callback: function(v) { return v + '%'; } },
+                    grid: { color: gridColor }
+                }
+            }
+        }
+    });
+
+    window.updateCJChart = function(siteId) {
+        activeSiteId = siteId;
+        const newCJ = getCJDataset(siteId);
+        
+        window.chartCJ.data.labels = newCJ.labels;
+        window.chartCJ.data.datasets[0].data = newCJ.percentages;
+        window.chartCJ.data.datasets[0].backgroundColor = newCJ.colors;
+        window.chartCJ.update();
+
+        // Update pill UI active state
+        document.querySelectorAll('#site-chart-pills button').forEach(btn => {
+            btn.classList.remove('active');
+        });
+        if (event && event.target) {
+            event.target.classList.add('active');
+        }
+    };
+});
+</script>
