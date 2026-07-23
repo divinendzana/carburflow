@@ -9,6 +9,14 @@ const fallbackDashboardData = {
   metric1: {
     labels: ['CP #1 (BUF Bepanda)', 'CP #2 (BUF Bonaberi)', 'CP #3 (BUF Yaounde)'],
     values: [62, 40, 55],
+    quantities: [2400, 1800, 2100],
+    dailySeries: {
+      1: {
+        labels: ['CJ #1', 'CJ #2', 'CJ #3'],
+        quantities: [720, 880, 800],
+        colors: ['#0b3d7a', '#3b82f6', '#60a5fa'],
+      },
+    },
   },
   metric2: {
     labels: ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jui'],
@@ -63,7 +71,8 @@ function Topbar({ activeView, onNavigate }) {
       <nav className="topbar-actions" aria-label="Navigation principale">
         <button type="button" className={`nav-link ${activeView === 'presentation' ? 'active' : ''}`} onClick={() => onNavigate('presentation')}>Présentation</button>
         <button type="button" className={`nav-link ${activeView === 'dashboard' ? 'active' : ''}`} onClick={() => onNavigate('dashboard')}>Dashboard</button>
-        <button type="button" className={`nav-link ${activeView === 'site' ? 'active' : ''}`} onClick={() => onNavigate('site')}>Site</button>
+        <button type="button" className={`nav-link ${activeView === 'site' ? 'active' : ''}`} onClick={() => onNavigate('site')}>Sites</button>
+        <button type="button" className={`nav-link ${activeView === 'cuves' ? 'active' : ''}`} onClick={() => onNavigate('cuves')}>Cuves</button>
         <button type="button" className={`nav-link ${activeView === 'groups' ? 'active' : ''}`} onClick={() => onNavigate('groups')}>Groupes</button>
       </nav>
     </header>
@@ -125,6 +134,42 @@ function GroupsPage({ onNavigate }) {
   const [rapportDebut, setRapportDebut] = useState('')
   const [rapportFin, setRapportFin] = useState('')
   const [siteId, setSiteId] = useState('')
+
+  const safeValue = (value) => (typeof value === 'number' ? value : 0)
+
+  const buildDerivedMetric = (values = []) => {
+    const normalizedValues = (values || []).map((value) => safeValue(value))
+    if (!normalizedValues.length) {
+      return {
+        total: 0,
+        mean: 0,
+        all_time_mean: 0,
+        all_time_stddev: 0,
+        variation_pct: null,
+        mean_variation_pct: null,
+        has_previous_period: false,
+      }
+    }
+
+    const total = normalizedValues.reduce((sum, value) => sum + value, 0)
+    const mean = total / normalizedValues.length
+    const firstValue = normalizedValues[0]
+    const lastValue = normalizedValues[normalizedValues.length - 1]
+    const variationPct = firstValue === 0 ? null : ((lastValue - firstValue) / firstValue) * 100
+    const meanVariationPct = firstValue === 0 ? null : ((mean - firstValue) / firstValue) * 100
+    const variance = normalizedValues.reduce((sum, value) => sum + (value - mean) ** 2, 0) / normalizedValues.length
+    const stddev = Math.sqrt(variance)
+
+    return {
+      total: Number(total.toFixed(1)),
+      mean: Number(mean.toFixed(1)),
+      all_time_mean: Number(mean.toFixed(1)),
+      all_time_stddev: Number(stddev.toFixed(1)),
+      variation_pct: variationPct === null ? null : Number(variationPct.toFixed(1)),
+      mean_variation_pct: meanVariationPct === null ? null : Number(meanVariationPct.toFixed(1)),
+      has_previous_period: normalizedValues.length > 1,
+    }
+  }
 
   const renderDelta = (metric, suffix = '') => {
     if (metric?.has_previous_period === false) {
@@ -268,6 +313,36 @@ function GroupsPage({ onNavigate }) {
         })
         charts.push(consChart)
       }
+
+      const hourlyConsumptionTarget = document.getElementById(`chart-group-${block.id}-hourly-consumption`)
+      if (hourlyConsumptionTarget) {
+        const hourlyValues = (block.hours_run || []).map((hours, index) => {
+          const hoursValue = safeValue(hours)
+          const consumptionValue = safeValue((block.consumption || block.consommation || [])[index])
+          return hoursValue > 0 ? Number((consumptionValue / hoursValue).toFixed(2)) : 0
+        })
+
+        const hourlyChart = new Chart(hourlyConsumptionTarget, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              {
+                label: 'Consommation horaire',
+                data: hourlyValues,
+                borderColor: block.color || '#0b3d7a',
+                backgroundColor: `${block.color || '#0b3d7a'}20`,
+                borderWidth: 2,
+                tension: 0.35,
+                fill: true,
+                pointRadius: 4,
+              },
+            ],
+          },
+          options: baseOptions('L/h', false),
+        })
+        charts.push(hourlyChart)
+      }
     })
 
     return () => charts.forEach((chart) => chart.destroy())
@@ -361,7 +436,7 @@ function GroupsPage({ onNavigate }) {
 
                   <div className="group-metric-grid">
                     <div className="metric-stat-block">
-                      <span className="curve-title">Variations horaires de fonctionnement</span>
+                      <span className="curve-title">Variations horaires</span>
                       <div className="group-stats">
                         <div>
                           <span>Total période</span>
@@ -378,14 +453,14 @@ function GroupsPage({ onNavigate }) {
                           <strong>{group.hours?.all_time_mean?.toFixed(1) ?? '—'} h</strong>
                         </div>
                         <div>
-                          <span>Écart type absolu</span>
+                          <span>Écart type</span>
                           <strong>{group.hours?.all_time_stddev?.toFixed(1) ?? '—'} h</strong>
                         </div>
                       </div>
                     </div>
 
                     <div className="metric-stat-block">
-                      <span className="curve-title">Consommation carburant</span>
+                      <span className="curve-title">Consommation</span>
                       <div className="group-stats">
                         <div>
                           <span>Total période</span>
@@ -402,8 +477,68 @@ function GroupsPage({ onNavigate }) {
                           <strong>{group.consumption_stats?.all_time_mean?.toFixed(1) ?? '—'} L</strong>
                         </div>
                         <div>
-                          <span>Écart type absolu</span>
+                          <span>Écart type</span>
                           <strong>{group.consumption_stats?.all_time_stddev?.toFixed(1) ?? '—'} L</strong>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="metric-stat-block">
+                      <span className="curve-title">Consommation horaire</span>
+                      <div className="group-stats">
+                        <div>
+                          <span>Total période</span>
+                          <strong>{(() => {
+                            const hourlyMetric = buildDerivedMetric((group.hours_run || []).map((hours, index) => {
+                              const hoursValue = safeValue(hours)
+                              const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
+                              return hoursValue > 0 ? consumptionValue / hoursValue : 0
+                            }))
+                            return `${hourlyMetric.total.toFixed(1)} L/h`
+                          })()}</strong>
+                          {renderDelta(buildDerivedMetric((group.hours_run || []).map((hours, index) => {
+                            const hoursValue = safeValue(hours)
+                            const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
+                            return hoursValue > 0 ? consumptionValue / hoursValue : 0
+                          })))}
+                        </div>
+                        <div>
+                          <span>Moyenne</span>
+                          <strong>{(() => {
+                            const hourlyMetric = buildDerivedMetric((group.hours_run || []).map((hours, index) => {
+                              const hoursValue = safeValue(hours)
+                              const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
+                              return hoursValue > 0 ? consumptionValue / hoursValue : 0
+                            }))
+                            return `${hourlyMetric.mean.toFixed(1)} L/h`
+                          })()}</strong>
+                          {renderMeanDelta(buildDerivedMetric((group.hours_run || []).map((hours, index) => {
+                            const hoursValue = safeValue(hours)
+                            const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
+                            return hoursValue > 0 ? consumptionValue / hoursValue : 0
+                          })))}
+                        </div>
+                        <div>
+                          <span>Moy. absolue</span>
+                          <strong>{(() => {
+                            const hourlyMetric = buildDerivedMetric((group.hours_run || []).map((hours, index) => {
+                              const hoursValue = safeValue(hours)
+                              const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
+                              return hoursValue > 0 ? consumptionValue / hoursValue : 0
+                            }))
+                            return `${hourlyMetric.all_time_mean.toFixed(1)} L/h`
+                          })()}</strong>
+                        </div>
+                        <div>
+                          <span>Écart type</span>
+                          <strong>{(() => {
+                            const hourlyMetric = buildDerivedMetric((group.hours_run || []).map((hours, index) => {
+                              const hoursValue = safeValue(hours)
+                              const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
+                              return hoursValue > 0 ? consumptionValue / hoursValue : 0
+                            }))
+                            return `${hourlyMetric.all_time_stddev.toFixed(1)} L/h`
+                          })()}</strong>
                         </div>
                       </div>
                     </div>
@@ -411,16 +546,360 @@ function GroupsPage({ onNavigate }) {
 
                   <div className="group-curve-grid">
                     <div className="chart-card">
-                      <span className="curve-title">Courbe des heures de fonctionnement (écarts)</span>
+                      <span className="curve-title">Courbe heures de fonctionnement</span>
                       <div className="chart-box small-box">
                         <canvas id={`chart-group-${group.id}-hours`} />
                       </div>
                     </div>
                     <div className="chart-card">
-                      <span className="curve-title">Courbe consommation (L/période)</span>
+                      <span className="curve-title">Courbe consommation</span>
                       <div className="chart-box small-box">
                         <canvas id={`chart-group-${group.id}-consumption`} />
                       </div>
+                    </div>
+                    <div className="chart-card">
+                      <span className="curve-title">Courbe consommation horaire</span>
+                      <div className="chart-box small-box">
+                        <canvas id={`chart-group-${group.id}-hourly-consumption`} />
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </section>
+          </>
+        )}
+      </main>
+    </div>
+  )
+}
+
+function CuvesPage({ onNavigate }) {
+  const chartPalette = useMemo(() => ({
+    text: '#23466d',
+    grid: 'rgba(11, 61, 122, 0.08)',
+  }), [])
+  const [cuvesData, setCuvesData] = useState(null)
+  const [rapportDebut, setRapportDebut] = useState('')
+  const [rapportFin, setRapportFin] = useState('')
+  const [siteId, setSiteId] = useState('')
+
+  const renderDelta = (metric, suffix = '') => {
+    if (metric?.has_previous_period === false) {
+      return <small className="delta-neutral">— pas de période précédente</small>
+    }
+
+    const deltaValue = typeof metric?.variation_pct === 'number' ? `${metric.variation_pct.toFixed(1)} %` : '—'
+    const deltaClass = (metric?.variation_pct ?? 0) >= 0 ? 'delta-up' : 'delta-down'
+    return <small className={deltaClass}>{deltaValue}{suffix}</small>
+  }
+
+  const renderMeanDelta = (metric, suffix = '') => {
+    if (metric?.has_previous_period === false) {
+      return <small className="delta-neutral">— pas de période précédente</small>
+    }
+
+    const deltaValue = typeof metric?.mean_variation_pct === 'number' ? `${metric.mean_variation_pct.toFixed(1)} %` : '—'
+    const deltaClass = (metric?.mean_variation_pct ?? 0) >= 0 ? 'delta-up' : 'delta-down'
+    return <small className={deltaClass}>{deltaValue}{suffix}</small>
+  }
+
+  const loadCuvesData = async (queryParams = '') => {
+    try {
+      const response = await fetch(`/dashboard/cuves${queryParams ? `?${queryParams}` : ''}`)
+      const data = await response.json()
+      setCuvesData(data)
+      setRapportDebut(data.selected_rapport_debut ?? '')
+      setRapportFin(data.selected_rapport_fin ?? '')
+      setSiteId(data.selected_site_id ?? '')
+    } catch (error) {
+      console.warn('Cuves backend unavailable, using demo fallback data.', error)
+      setCuvesData({
+        period_label: 'Période de démonstration',
+        selected_site_id: 1,
+        rapport_choices: [{ id: 1, label: '01/01 au 07/01' }, { id: 2, label: '08/01 au 14/01' }],
+        sites: [{ id: 1, nom_site: 'BUF Bepanda' }],
+        site_principal_stats: { total: 18000, mean: 9000, previous_total: 16000, previous_mean: 8000, variation_pct: 12.5, mean_variation_pct: 12.5, all_time_mean: 8500, all_time_stddev: 1200, has_previous_period: true },
+        site_journalier_stats: { total: 9200, mean: 4600, previous_total: 8400, previous_mean: 4200, variation_pct: 9.5, mean_variation_pct: 9.5, all_time_mean: 4300, all_time_stddev: 650, has_previous_period: true },
+        labels: ['01/01 au 07/01', '08/01 au 14/01'],
+        principal_blocks: [
+          { id: 1, label: 'CP #1 (BUF Bepanda)', capacity: 500000, color: '#0d6efd', stats: { total: 9600, mean: 4800, previous_total: 8500, previous_mean: 4250, variation_pct: 12.9, mean_variation_pct: 12.9, all_time_mean: 4500, all_time_stddev: 700, has_previous_period: true } },
+          { id: 2, label: 'CP #2 (BUF Bepanda)', capacity: 450000, color: '#198754', stats: { total: 8400, mean: 4200, previous_total: 7500, previous_mean: 3750, variation_pct: 12.0, mean_variation_pct: 12.0, all_time_mean: 3900, all_time_stddev: 500, has_previous_period: true } },
+        ],
+        journalier_blocks: [
+          { id: 1, label: 'CJ #1 (BUF Bepanda)', capacity: 150000, color: '#ffc107', stats: { total: 5000, mean: 2500, previous_total: 4700, previous_mean: 2350, variation_pct: 6.4, mean_variation_pct: 6.4, all_time_mean: 2400, all_time_stddev: 320, has_previous_period: true } },
+          { id: 2, label: 'CJ #2 (BUF Bepanda)', capacity: 140000, color: '#dc3545', stats: { total: 4200, mean: 2100, previous_total: 3700, previous_mean: 1850, variation_pct: 13.5, mean_variation_pct: 13.5, all_time_mean: 2000, all_time_stddev: 280, has_previous_period: true } },
+        ],
+      })
+    }
+  }
+
+  useEffect(() => {
+    loadCuvesData()
+  }, [])
+
+  useEffect(() => {
+    if (!window.Chart || !cuvesData) {
+      return undefined
+    }
+
+    const charts = []
+    const labels = cuvesData.labels || []
+
+    const baseOptions = (unit = 'L') => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: chartPalette.text,
+            callback: (value) => `${value.toLocaleString('fr-FR')} ${unit}`,
+          },
+          grid: { color: chartPalette.grid },
+        },
+      },
+    })
+
+    ;(cuvesData.principal_blocks || []).forEach((block) => {
+      const target = document.getElementById(`chart-cuve-principale-${block.id}`)
+      if (target) {
+        const chart = new Chart(target, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              label: block.label,
+              data: block.values || [],
+              borderColor: block.color || '#0b3d7a',
+              backgroundColor: `${block.color || '#0b3d7a'}20`,
+              borderWidth: 2,
+              tension: 0.35,
+              fill: true,
+              pointRadius: 4,
+            }],
+          },
+          options: baseOptions('L'),
+        })
+        charts.push(chart)
+      }
+    })
+
+    ;(cuvesData.journalier_blocks || []).forEach((block) => {
+      const target = document.getElementById(`chart-cuve-journaliere-${block.id}`)
+      if (target) {
+        const chart = new Chart(target, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              label: block.label,
+              data: block.values || [],
+              borderColor: block.color || '#0b3d7a',
+              backgroundColor: `${block.color || '#0b3d7a'}20`,
+              borderWidth: 2,
+              tension: 0.35,
+              fill: true,
+              pointRadius: 4,
+            }],
+          },
+          options: baseOptions('L'),
+        })
+        charts.push(chart)
+      }
+    })
+
+    return () => charts.forEach((chart) => chart.destroy())
+  }, [chartPalette, cuvesData])
+
+  const selectedSite = cuvesData?.sites?.find((site) => String(site.id) === String(siteId)) ?? cuvesData?.sites?.[0]
+
+  const applyFilters = async (event) => {
+    event.preventDefault()
+    const params = new URLSearchParams()
+    if (rapportDebut) params.set('rapport_debut', rapportDebut)
+    if (rapportFin) params.set('rapport_fin', rapportFin)
+    if (siteId) params.set('site_id', siteId)
+    await loadCuvesData(params.toString())
+  }
+
+  return (
+    <div className="app-shell dashboard-shell">
+      <Topbar activeView="cuves" onNavigate={onNavigate} />
+
+      <main className="groups-grid">
+        {cuvesData && (
+          <>
+            <form className="groups-filter-bar" onSubmit={applyFilters}>
+              <div className="filter-field">
+                <label htmlFor="cuves-debut">Rapport début</label>
+                <select id="cuves-debut" value={rapportDebut} onChange={(event) => setRapportDebut(event.target.value)}>
+                  {(cuvesData.rapport_choices || []).map((choice) => (
+                    <option key={choice.id} value={choice.id}>{choice.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="filter-field">
+                <label htmlFor="cuves-fin">Rapport fin</label>
+                <select id="cuves-fin" value={rapportFin} onChange={(event) => setRapportFin(event.target.value)}>
+                  {(cuvesData.rapport_choices || []).map((choice) => (
+                    <option key={choice.id} value={choice.id}>{choice.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="filter-field">
+                <label htmlFor="cuves-site">Site</label>
+                <select id="cuves-site" value={siteId} onChange={(event) => setSiteId(event.target.value)}>
+                  {(cuvesData.sites || []).map((site) => (
+                    <option key={site.id} value={site.id}>{site.nom_site}</option>
+                  ))}
+                </select>
+              </div>
+              <button type="submit" className="filter-submit">Appliquer</button>
+            </form>
+
+            <section className="metric-section">
+              <div className="section-title-wrap">
+                <span className="metric-label">Sous-rubrique 1</span>
+                <h2>Cuves principales</h2>
+                <p className="group-header-meta">Volume total, moyenne, moyenne absolue et écart type absolu par site et par cuve principale.</p>
+              </div>
+              <div className="summary-strip">
+                <div className="summary-chip">
+                  <span>Total période</span>
+                  <strong>{cuvesData.site_principal_stats?.total?.toFixed(1) ?? '—'} L</strong>
+                  {renderDelta(cuvesData.site_principal_stats)}
+                </div>
+                <div className="summary-chip">
+                  <span>Moyenne</span>
+                  <strong>{cuvesData.site_principal_stats?.mean?.toFixed(1) ?? '—'} L</strong>
+                  {renderMeanDelta(cuvesData.site_principal_stats)}
+                </div>
+                <div className="summary-chip">
+                  <span>Moy. absolue</span>
+                  <strong>{cuvesData.site_principal_stats?.all_time_mean?.toFixed(1) ?? '—'} L</strong>
+                </div>
+                <div className="summary-chip">
+                  <span>Écart type absolu</span>
+                  <strong>{cuvesData.site_principal_stats?.all_time_stddev?.toFixed(1) ?? '—'} L</strong>
+                </div>
+              </div>
+            </section>
+
+            <section className="groups-list">
+              {(cuvesData.principal_blocks || []).map((block) => (
+                <article key={block.id} className="group-card" style={{ borderLeft: `4px solid ${block.color || '#0b3d7a'}` }}>
+                  <div className="group-card-head">
+                    <span className="metric-label">Cuve principale</span>
+                    <h3>{block.label}</h3>
+                    <p className="group-header-meta">Capacité : {block.capacity?.toFixed(1) ?? '—'} L</p>
+                  </div>
+
+                  <div className="cuve-metric-layout">
+                    <div className="metric-stat-block wide-metric-block">
+                      <span className="curve-title">Volume carburant</span>
+                      <div className="group-stats wide-stats-grid">
+                        <div>
+                          <span>Total période</span>
+                          <strong>{block.stats?.total?.toFixed(1) ?? '—'} L</strong>
+                          {renderDelta(block.stats)}
+                        </div>
+                        <div>
+                          <span>Moyenne</span>
+                          <strong>{block.stats?.mean?.toFixed(1) ?? '—'} L</strong>
+                          {renderMeanDelta(block.stats)}
+                        </div>
+                        <div>
+                          <span>Moy. absolue</span>
+                          <strong>{block.stats?.all_time_mean?.toFixed(1) ?? '—'} L</strong>
+                        </div>
+                        <div>
+                          <span>Écart type absolu</span>
+                          <strong>{block.stats?.all_time_stddev?.toFixed(1) ?? '—'} L</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="chart-card">
+                    <span className="curve-title">Courbe du volume de la cuve</span>
+                    <div className="chart-box small-box">
+                      <canvas id={`chart-cuve-principale-${block.id}`} />
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </section>
+
+            <section className="metric-section">
+              <div className="section-title-wrap">
+                <span className="metric-label">Sous-rubrique 2</span>
+                <h2>Cuves journalières</h2>
+                <p className="group-header-meta">Même logique analytique sur les cuves journalières associées au site sélectionné.</p>
+              </div>
+              <div className="summary-strip">
+                <div className="summary-chip">
+                  <span>Total période</span>
+                  <strong>{cuvesData.site_journalier_stats?.total?.toFixed(1) ?? '—'} L</strong>
+                  {renderDelta(cuvesData.site_journalier_stats)}
+                </div>
+                <div className="summary-chip">
+                  <span>Moyenne</span>
+                  <strong>{cuvesData.site_journalier_stats?.mean?.toFixed(1) ?? '—'} L</strong>
+                  {renderMeanDelta(cuvesData.site_journalier_stats)}
+                </div>
+                <div className="summary-chip">
+                  <span>Moy. absolue</span>
+                  <strong>{cuvesData.site_journalier_stats?.all_time_mean?.toFixed(1) ?? '—'} L</strong>
+                </div>
+                <div className="summary-chip">
+                  <span>Écart type absolu</span>
+                  <strong>{cuvesData.site_journalier_stats?.all_time_stddev?.toFixed(1) ?? '—'} L</strong>
+                </div>
+              </div>
+            </section>
+
+            <section className="groups-list">
+              {(cuvesData.journalier_blocks || []).map((block) => (
+                <article key={block.id} className="group-card" style={{ borderLeft: `4px solid ${block.color || '#0b3d7a'}` }}>
+                  <div className="group-card-head">
+                    <span className="metric-label">Cuve journalière</span>
+                    <h3>{block.label}</h3>
+                    <p className="group-header-meta">Capacité : {block.capacity?.toFixed(1) ?? '—'} L</p>
+                  </div>
+
+                  <div className="cuve-metric-layout">
+                    <div className="metric-stat-block wide-metric-block">
+                      <span className="curve-title">Volume carburant</span>
+                      <div className="group-stats wide-stats-grid">
+                        <div>
+                          <span>Total période</span>
+                          <strong>{block.stats?.total?.toFixed(1) ?? '—'} L</strong>
+                          {renderDelta(block.stats)}
+                        </div>
+                        <div>
+                          <span>Moyenne</span>
+                          <strong>{block.stats?.mean?.toFixed(1) ?? '—'} L</strong>
+                          {renderMeanDelta(block.stats)}
+                        </div>
+                        <div>
+                          <span>Moy. absolue</span>
+                          <strong>{block.stats?.all_time_mean?.toFixed(1) ?? '—'} L</strong>
+                        </div>
+                        <div>
+                          <span>Écart type absolu</span>
+                          <strong>{block.stats?.all_time_stddev?.toFixed(1) ?? '—'} L</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="chart-card">
+                    <span className="curve-title">Courbe du volume de la cuve</span>
+                    <div className="chart-box small-box">
+                      <canvas id={`chart-cuve-journaliere-${block.id}`} />
                     </div>
                   </div>
                 </article>
@@ -725,8 +1204,8 @@ function SitePage({ onNavigate }) {
 
             <section className="site-overview">
               <div className="section-title-wrap">
-                <span className="metric-label">Rubrique site</span>
-                <h2>{selectedSite?.nom_site || 'Site'}</h2>
+                <span className="metric-label">Sites</span>
+                <h2>{selectedSite?.nom_site || 'Sites'}</h2>
               </div>
               <div className="site-metric-grid">
                 <article className="metric-panel site-metric-card">
@@ -828,6 +1307,15 @@ function DashboardPage({ onNavigate }) {
     text: '#23466d',
   }), [])
   const [dashboardData, setDashboardData] = useState(null)
+  const [periodStart, setPeriodStart] = useState(0)
+  const [periodEnd, setPeriodEnd] = useState(0)
+
+  const sliceRange = (items = []) => {
+    if (!items.length) return []
+    const start = Math.min(periodStart, periodEnd)
+    const end = Math.max(periodStart, periodEnd)
+    return items.slice(start, end + 1)
+  }
 
   useEffect(() => {
     const loadDashboardData = async () => {
@@ -843,6 +1331,8 @@ function DashboardPage({ onNavigate }) {
           metric1: {
             labels: metric1.cp_chart_labels,
             values: metric1.cp_chart_pcts,
+            quantities: metric1.cp_chart_quantities,
+            dailySeries: metric1.sites_cj_chart_data,
           },
           metric2: {
             labels: metric2.labels,
@@ -870,11 +1360,23 @@ function DashboardPage({ onNavigate }) {
   }, [])
 
   useEffect(() => {
+    if (!dashboardData) return
+
+    const lastIndex = Math.max((dashboardData.metric2.labels?.length || 1) - 1, 0)
+    setPeriodStart(0)
+    setPeriodEnd(lastIndex)
+  }, [dashboardData])
+
+  useEffect(() => {
     if (!window.Chart || !dashboardData) {
       return undefined
     }
 
     const charts = []
+    const labels = sliceRange(dashboardData.metric2.labels)
+    const globalVolumesRange = sliceRange(dashboardData.metric2.globalVolumes)
+    const globalHoursRange = sliceRange(dashboardData.metric3.globalHours)
+    const globalConsumptionRange = sliceRange(dashboardData.metric4.globalConsumption)
 
     const createLineChart = (id, data, label, color, labelsForChart, fill = false) => {
       const ctx = document.getElementById(id)
@@ -943,19 +1445,52 @@ function DashboardPage({ onNavigate }) {
     }
 
     createBarChart('chart-metric-1', dashboardData.metric1.values, 'Niveau des cuves (%)', dashboardData.metric1.labels, '#0b3d7a')
-    createLineChart('chart-metric-2', dashboardData.metric2.globalVolumes, 'Volume total global', '#0b3d7a', dashboardData.metric2.labels, true)
-    createLineChart('chart-metric-3', dashboardData.metric3.globalHours, 'Écart horaire global', '#3b82f6', dashboardData.metric3.labels, true)
-    createLineChart('chart-metric-4', dashboardData.metric4.globalConsumption, 'Consommation globale', '#60a5fa', dashboardData.metric4.labels, true)
+
+    const dailySeriesEntries = Object.entries(dashboardData.metric1.dailySeries || {})
+    const dailySeries = dailySeriesEntries[0]?.[1]
+    if (dailySeries) {
+      const dailyCtx = document.getElementById('chart-metric-1-daily')
+      if (dailyCtx) {
+        const dailyChart = new Chart(dailyCtx, {
+          type: 'bar',
+          data: {
+            labels: dailySeries.labels || [],
+            datasets: [
+              {
+                label: 'Volume journalier (L)',
+                data: dailySeries.quantities || [],
+                backgroundColor: dailySeries.colors || ['#0b3d7a'],
+                borderRadius: 8,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: { legend: { display: false } },
+            scales: {
+              x: { ticks: { color: chartPalette.text }, grid: { display: false } },
+              y: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
+            },
+          },
+        })
+        charts.push(dailyChart)
+      }
+    }
+
+    createLineChart('chart-metric-2', globalVolumesRange, 'Volume total global', '#0b3d7a', labels, true)
+    createLineChart('chart-metric-3', globalHoursRange, 'Écart horaire global', '#3b82f6', labels, true)
+    createLineChart('chart-metric-4', globalConsumptionRange, 'Consommation globale', '#60a5fa', labels, true)
 
     const siteVolumeCtx = document.getElementById('chart-metric-2-sites')
     if (siteVolumeCtx) {
       const siteChart = new Chart(siteVolumeCtx, {
         type: 'line',
         data: {
-          labels: dashboardData.metric2.labels,
+          labels,
           datasets: dashboardData.metric2.siteSeries.map((site) => ({
             label: site.label,
-            data: site.data,
+            data: sliceRange(site.data),
             borderColor: site.borderColor || site.color,
             backgroundColor: site.backgroundColor || `${site.borderColor || site.color}22`,
             borderWidth: 2,
@@ -981,7 +1516,7 @@ function DashboardPage({ onNavigate }) {
       const siteHoursDatasets = Object.values(dashboardData.metric3.sitesData || {}).flatMap((site) =>
         (site.datasets || []).map((dataset) => ({
           label: dataset.label,
-          data: dataset.data,
+          data: sliceRange(dataset.data),
           borderColor: dataset.borderColor,
           backgroundColor: dataset.backgroundColor,
           borderWidth: 2,
@@ -993,7 +1528,7 @@ function DashboardPage({ onNavigate }) {
       const siteHoursChart = new Chart(siteHoursCtx, {
         type: 'line',
         data: {
-          labels: dashboardData.metric3.labels,
+          labels,
           datasets: siteHoursDatasets,
         },
         options: {
@@ -1014,10 +1549,10 @@ function DashboardPage({ onNavigate }) {
       const siteConsumptionChart = new Chart(siteConsumptionCtx, {
         type: 'line',
         data: {
-          labels: dashboardData.metric4.labels,
+          labels,
           datasets: dashboardData.metric4.siteSeries.map((site) => ({
             label: site.label,
-            data: site.data,
+            data: sliceRange(site.data),
             borderColor: site.borderColor || site.color,
             backgroundColor: site.backgroundColor || `${site.borderColor || site.color}22`,
             borderWidth: 2,
@@ -1041,7 +1576,7 @@ function DashboardPage({ onNavigate }) {
     return () => {
       charts.forEach((chart) => chart.destroy())
     }
-  }, [chartPalette, dashboardData])
+  }, [chartPalette, dashboardData, periodStart, periodEnd])
 
   return (
     <div className="app-shell dashboard-shell">
@@ -1050,35 +1585,67 @@ function DashboardPage({ onNavigate }) {
       <main className="dashboard-grid">
         <section className="dashboard-cards">
           <MetricPanel label="Métrique 1" title="Cuves principales">
-            <div className="chart-box fixed-box">
-              <canvas id="chart-metric-1" />
+            <div className="metric-stack">
+              <div className="chart-box fixed-box">
+                <canvas id="chart-metric-1" />
+              </div>
+              <div className="chart-box fixed-box">
+                <canvas id="chart-metric-1-daily" />
+              </div>
             </div>
           </MetricPanel>
 
-          <MetricPanel label="Métrique 2" title="Volumes cumulés">
-            <div className="chart-box fixed-box">
-              <canvas id="chart-metric-2" />
+          {dashboardData && (
+            <div className="period-bar">
+              <div className="filter-field">
+                <label htmlFor="dashboard-start">Rapport début</label>
+                <select id="dashboard-start" value={periodStart} onChange={(event) => setPeriodStart(Number(event.target.value))}>
+                  {dashboardData.metric2.labels.map((label, index) => (
+                    <option key={`${label}-${index}`} value={index}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="filter-field">
+                <label htmlFor="dashboard-end">Rapport fin</label>
+                <select id="dashboard-end" value={periodEnd} onChange={(event) => setPeriodEnd(Number(event.target.value))}>
+                  {dashboardData.metric2.labels.map((label, index) => (
+                    <option key={`${label}-${index}`} value={index}>{label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div className="chart-box secondary-box">
-              <canvas id="chart-metric-2-sites" />
+          )}
+
+          <MetricPanel label="Métrique 2" title="Quantité de carburant dans les cuves">
+            <div className="metric-split-grid">
+              <div className="chart-box fixed-box">
+                <canvas id="chart-metric-2" />
+              </div>
+              <div className="chart-box fixed-box">
+                <canvas id="chart-metric-2-sites" />
+              </div>
             </div>
           </MetricPanel>
 
-          <MetricPanel label="Métrique 3" title="Horaires / écarts">
-            <div className="chart-box fixed-box">
-              <canvas id="chart-metric-3" />
-            </div>
-            <div className="chart-box secondary-box">
-              <canvas id="chart-metric-3-sites" />
+          <MetricPanel label="Métrique 3" title="Variations horaires">
+            <div className="metric-split-grid">
+              <div className="chart-box fixed-box">
+                <canvas id="chart-metric-3" />
+              </div>
+              <div className="chart-box fixed-box">
+                <canvas id="chart-metric-3-sites" />
+              </div>
             </div>
           </MetricPanel>
 
           <MetricPanel label="Métrique 4" title="Consommation">
-            <div className="chart-box fixed-box">
-              <canvas id="chart-metric-4" />
-            </div>
-            <div className="chart-box secondary-box">
-              <canvas id="chart-metric-4-sites" />
+            <div className="metric-split-grid">
+              <div className="chart-box fixed-box">
+                <canvas id="chart-metric-4" />
+              </div>
+              <div className="chart-box fixed-box">
+                <canvas id="chart-metric-4-sites" />
+              </div>
             </div>
           </MetricPanel>
         </section>
@@ -1095,6 +1662,7 @@ function App() {
       presentation: '/',
       dashboard: '/dashboard/',
       site: '/site/',
+      cuves: '/cuves/',
       groups: '/groupes/',
     }
 
@@ -1113,6 +1681,11 @@ function App() {
 
       if (pathname.startsWith('/site')) {
         setView('site')
+        return
+      }
+
+      if (pathname.startsWith('/cuves')) {
+        setView('cuves')
         return
       }
 
@@ -1137,6 +1710,7 @@ function App() {
       {view === 'presentation' && <PresentationPage onNavigate={navigate} />}
       {view === 'dashboard' && <DashboardPage onNavigate={navigate} />}
       {view === 'site' && <SitePage onNavigate={navigate} />}
+      {view === 'cuves' && <CuvesPage onNavigate={navigate} />}
       {view === 'groups' && <GroupsPage onNavigate={navigate} />}
     </>
   )

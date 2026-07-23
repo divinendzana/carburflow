@@ -192,8 +192,32 @@ button {
 .metrics-grid,
 .dashboard-cards {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 18px;
+}
+
+.metric-panel:nth-child(1) {
+  grid-column: 1 / -1;
+}
+
+.metric-panel:nth-child(2),
+.metric-panel:nth-child(3),
+.metric-panel:nth-child(4) {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.period-bar {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+  padding: 16px;
 }
 
 .metric-card,
@@ -279,6 +303,18 @@ button {
   margin-top: 14px;
 }
 
+.metric-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.metric-split-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
 .fixed-box {
   height: 280px;
 }
@@ -290,6 +326,53 @@ button {
 .metric-section {
   display: grid;
   gap: 16px;
+}
+
+.site-overview {
+  display: grid;
+  gap: 16px;
+}
+
+.site-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.site-metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.site-metric-card:first-child {
+  grid-column: 1 / -1;
+}
+
+.site-metric-stack {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.site-metric-stack > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 14px;
+  background: rgba(11, 61, 122, 0.04);
+}
+
+.site-metric-stack span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.site-metric-stack strong {
+  color: var(--primary);
+  font-size: 1.05rem;
 }
 
 .section-title-wrap {
@@ -422,8 +505,21 @@ button {
 
 .group-metric-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
+}
+
+.cuve-metric-layout {
+  display: grid;
+  gap: 16px;
+}
+
+.wide-metric-block {
+  width: 100%;
+}
+
+.wide-stats-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .metric-stat-block {
@@ -437,13 +533,13 @@ button {
 
 .group-stats {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 
 .group-curve-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
 
