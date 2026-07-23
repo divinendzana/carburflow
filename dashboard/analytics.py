@@ -56,9 +56,10 @@ def _period_stats(values: list[float], start_idx: int, end_idx: int) -> dict:
         return _empty_window_stats()
 
     total = sum(window)
-    mean = total / len(window)
+    window_nonzero = [v for v in window if v > 0]
+    mean = sum(window_nonzero) / len(window_nonzero) if window_nonzero else 0.0
 
-    meaningful = [v for v in values[1:] if v > 0] or values
+    meaningful = [v for v in values if v > 0]
     all_time_mean = sum(meaningful) / len(meaningful) if meaningful else 0.0
     all_time_stddev = _stddev(meaningful)
 
@@ -78,8 +79,9 @@ def _period_stats(values: list[float], start_idx: int, end_idx: int) -> dict:
 
     prev_start, prev_end = prev_indices
     prev_window = values[prev_start:prev_end + 1]
+    prev_window_nonzero = [v for v in prev_window if v > 0]
     prev_total = sum(prev_window)
-    prev_mean = prev_total / len(prev_window) if prev_window else 0.0
+    prev_mean = sum(prev_window_nonzero) / len(prev_window_nonzero) if prev_window_nonzero else 0.0
 
     return {
         'total': round(total, 1),
@@ -119,6 +121,9 @@ def build_groupe_timeseries():
     groupe_to_site = {}
     site_groupes = {}
 
+    group_cj_ids: dict[int, set[int]] = {}
+    group_cp_ids: dict[int, set[int]] = {}
+
     for site in sites:
         groupes_set = set()
         for cp in site.cuves_principales.all():
@@ -126,6 +131,8 @@ def build_groupe_timeseries():
                 for g in cj.groupes_electrogenes.all():
                     groupes_set.add(g)
                     groupe_to_site[g.id] = site.id
+                    group_cj_ids.setdefault(g.id, set()).add(cj.id)
+                    group_cp_ids.setdefault(g.id, set()).add(cp.id)
                     groupe_meta[g.id] = {
                         'id': g.id,
                         'label': f'G#{g.id} ({g.marque} {g.puissance})',
@@ -189,6 +196,29 @@ def build_groupe_timeseries():
                 hours_run_by_site[sid][i] += val
     hours_run_by_site = {sid: [round(v, 1) for v in vals] for sid, vals in hours_run_by_site.items()}
 
+    latest_cj_volumes: dict[int, float] = {}
+    latest_cp_volumes: dict[int, float] = {}
+    if reports:
+        latest_report = reports[-1]
+        latest_lignes = LigneRapport.objects.filter(rapport=latest_report)
+        for l in latest_lignes:
+            if l.cuve_journaliere_id:
+                existing = latest_cj_volumes.get(l.cuve_journaliere_id, 0.0)
+                latest_cj_volumes[l.cuve_journaliere_id] = max(existing, l.quantite_gasoil_cuve_journaliere)
+            if l.cuve_principale_id:
+                existing = latest_cp_volumes.get(l.cuve_principale_id, 0.0)
+                latest_cp_volumes[l.cuve_principale_id] = max(existing, l.quantite_gasoil_cuve_principale)
+
+    group_last_report_volume = {
+        g_id: sum(latest_cj_volumes.get(cj_id, 0.0) for cj_id in cj_ids)
+        for g_id, cj_ids in group_cj_ids.items()
+    }
+
+    group_last_report_cp_volume = {
+        g_id: sum(latest_cp_volumes.get(cp_id, 0.0) for cp_id in cp_ids)
+        for g_id, cp_ids in group_cp_ids.items()
+    }
+
     cumulative_global = []
     for r in reports:
         lignes = LigneRapport.objects.filter(rapport=r)
@@ -207,6 +237,8 @@ def build_groupe_timeseries():
         'site_groupes': site_groupes,
         'groupe_meta': groupe_meta,
         'groupe_compteurs': groupe_compteurs,
+        'group_last_report_volume': group_last_report_volume,
+        'group_last_report_cp_volume': group_last_report_cp_volume,
         'hours_run_global': hours_run_global,
         'hours_run_by_groupe': hours_run_by_groupe,
         'hours_run_by_site': hours_run_by_site,
@@ -282,6 +314,19 @@ def get_groupes_page_context(rapport_debut_id=None, rapport_fin_id=None, site_id
         hours_run = ts['hours_run_by_groupe'][g.id]
         consumption = ts['consumption_by_groupe'][g.id]
         compteurs = ts['groupe_compteurs'][g.id]
+        last_report_volume = ts['group_last_report_volume'].get(g.id, 0.0)
+        last_cp_volume = ts['group_last_report_cp_volume'].get(g.id, 0.0)
+        consumption_stats = _period_stats(consumption, start_idx, end_idx)
+        avg_abs_consumption = consumption_stats['all_time_mean']
+
+        if last_cp_volume <= 0:
+            autonomie_hours = round(last_report_volume / avg_abs_consumption, 1) if avg_abs_consumption > 0 else None
+        else:
+            remaining_cp_volume = max(0.0, last_cp_volume - last_report_volume)
+            total_consumption = consumption_stats['total']
+            autonomie_cp = round(remaining_cp_volume / total_consumption, 1) if total_consumption > 0 else 0.0
+            autonomie_cj = round(last_report_volume / avg_abs_consumption, 1) if avg_abs_consumption > 0 else 0.0
+            autonomie_hours = round(autonomie_cp + autonomie_cj, 1)
 
         group_blocks.append({
             'id': g.id,
@@ -291,7 +336,8 @@ def get_groupes_page_context(rapport_debut_id=None, rapport_fin_id=None, site_id
             'rate': meta['rate'],
             'color': color,
             'hours_stats': _period_stats(hours_run, start_idx, end_idx),
-            'consumption_stats': _period_stats(consumption, start_idx, end_idx),
+            'consumption_stats': consumption_stats,
+            'autonomie_hours': autonomie_hours,
             'compteurs_json': json.dumps([round(v, 1) for v in compteurs[start_idx:end_idx + 1]]),
             'hours_run_json': json.dumps([round(v, 1) for v in hours_run[start_idx:end_idx + 1]]),
             'consumption_json': json.dumps([round(v, 1) for v in consumption[start_idx:end_idx + 1]]),
@@ -363,8 +409,8 @@ def get_cuves_page_context(rapport_debut_id=None, rapport_fin_id=None, site_id=N
     journalier_blocks = []
 
     if selected_site:
-        principal_tanks = list(selected_site.cuves_principales.all())
-        journalier_tanks = [cj for cp in principal_tanks for cj in cp.cuves_journalieres.all()]
+        principal_tanks = [cp for cp in selected_site.cuves_principales.all() if (cp.capacite or 0) > 0]
+        journalier_tanks = [cj for cp in principal_tanks for cj in cp.cuves_journalieres.all() if (cj.capacite or 0) > 0]
 
         for index, cp in enumerate(principal_tanks):
             values = [
@@ -397,9 +443,11 @@ def get_cuves_page_context(rapport_debut_id=None, rapport_fin_id=None, site_id=N
     site_principal_values = []
     site_journalier_values = []
     if selected_site:
+        principal_tanks = [cp for cp in selected_site.cuves_principales.all() if (cp.capacite or 0) > 0]
+        journalier_tanks = [cj for cp in principal_tanks for cj in cp.cuves_journalieres.all() if (cj.capacite or 0) > 0]
         for principal_map, journaliere_map in report_series:
-            site_principal_values.append(sum(principal_map.get(cp.id, 0.0) for cp in selected_site.cuves_principales.all()))
-            site_journalier_values.append(sum(journaliere_map.get(cj.id, 0.0) for cp in selected_site.cuves_principales.all() for cj in cp.cuves_journalieres.all()))
+            site_principal_values.append(sum(principal_map.get(cp.id, 0.0) for cp in principal_tanks))
+            site_journalier_values.append(sum(journaliere_map.get(cj.id, 0.0) for cj in journalier_tanks))
 
     rapport_choices = [
         {'id': r.id, 'label': labels[i]}

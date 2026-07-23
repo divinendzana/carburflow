@@ -427,11 +427,11 @@ button {
 }
 
 .delta-up {
-  color: #dc3545;
+  color: #198754;
 }
 
 .delta-down {
-  color: #198754;
+  color: #dc3545;
 }
 
 .delta-neutral {
@@ -471,6 +471,73 @@ button {
   border-radius: 20px;
   box-shadow: var(--shadow);
   padding: 16px;
+}
+
+.hero-stats {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+.stat-card {
+  background: linear-gradient(180deg, #ffffff, #fbfdff);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+
+.stat-card-label {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.stat-card-value {
+  font-size: 1.8rem;
+  font-weight: 900;
+  color: var(--primary);
+  margin-top: 6px;
+}
+
+.stat-card-sub {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.hero-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary), var(--primary-2));
+  color: white;
+  border: none;
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--primary);
+  border: 1px solid var(--border);
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-weight: 800;
+  cursor: pointer;
 }
 
 .filter-field {

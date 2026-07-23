@@ -13,7 +13,7 @@ const fallbackDashboardData = {
     dailySeries: {
       1: {
         labels: ['CJ #1', 'CJ #2', 'CJ #3'],
-        quantities: [720, 880, 800],
+        percentages: [72, 88, 80],
         colors: ['#0b3d7a', '#3b82f6', '#60a5fa'],
       },
     },
@@ -80,6 +80,44 @@ function Topbar({ activeView, onNavigate }) {
 }
 
 function PresentationPage({ onNavigate }) {
+  const [siteCount, setSiteCount] = useState(null)
+  const [groupCount, setGroupCount] = useState(null)
+  const [lastReportLabel, setLastReportLabel] = useState('')
+
+  useEffect(() => {
+    const loadOverviewData = async () => {
+      try {
+        const [siteResponse, etatCuvesResponse] = await Promise.all([
+          fetch('/sites?limit=1'),
+          fetch('/dashboard/etat_cuves'),
+        ])
+
+        const siteData = await siteResponse.json()
+        const etatCuvesData = await etatCuvesResponse.json()
+
+        const count = typeof siteData.count === 'number'
+          ? siteData.count
+          : Array.isArray(siteData)
+            ? siteData.length
+            : typeof siteData.results?.length === 'number'
+              ? siteData.results.length
+              : 0
+        setSiteCount(count)
+        setGroupCount(etatCuvesData.groupes_count ?? 0)
+
+        if (etatCuvesData.dernier_rapport?.date_debut && etatCuvesData.dernier_rapport?.date_fin) {
+          setLastReportLabel(`${new Date(etatCuvesData.dernier_rapport.date_debut).toLocaleDateString('fr-FR')} → ${new Date(etatCuvesData.dernier_rapport.date_fin).toLocaleDateString('fr-FR')}`)
+        } else if (etatCuvesData.dernier_rapport?.date_fin) {
+          setLastReportLabel(new Date(etatCuvesData.dernier_rapport.date_fin).toLocaleDateString('fr-FR'))
+        }
+      } catch (error) {
+        console.warn('Unable to load presentation overview data', error)
+      }
+    }
+
+    loadOverviewData()
+  }, [])
+
   return (
     <div className="app-shell">
       <Topbar activeView="presentation" onNavigate={onNavigate} />
@@ -96,17 +134,29 @@ function PresentationPage({ onNavigate }) {
           </div>
 
           <div className="hero-stats">
-            <div className="stat-pill">
-              <span>Sites actifs</span>
-              <strong>03</strong>
+            <div className="stat-grid">
+              <div className="stat-card">
+                <div className="stat-card-label">Sites actifs</div>
+                <div className="stat-card-value">{siteCount ?? '—'}</div>
+                <div className="stat-card-sub">Nombre de sites monitorés</div>
+              </div>
+
+              <div className="stat-card">
+                <div className="stat-card-label">Groupes suivis</div>
+                <div className="stat-card-value">{groupCount ?? '—'}</div>
+                <div className="stat-card-sub">Groupes électrogènes couverts</div>
+              </div>
+
+              <div className="stat-card">
+                <div className="stat-card-label">Dernier rapport</div>
+                <div className="stat-card-value">{lastReportLabel || '—'}</div>
+                <div className="stat-card-sub">Date du dernier rapport disponible</div>
+              </div>
             </div>
-            <div className="stat-pill">
-              <span>Groupes suivis</span>
-              <strong>03</strong>
-            </div>
-            <div className="stat-pill">
-              <span>Dernier rapport</span>
-              <strong>2026</strong>
+
+            <div className="hero-actions">
+              <button type="button" className="btn-primary" onClick={() => onNavigate('dashboard')}>Voir le dashboard</button>
+              <button type="button" className="btn-ghost" onClick={() => onNavigate('site')}>Parcourir les sites</button>
             </div>
           </div>
         </section>
@@ -138,7 +188,7 @@ function GroupsPage({ onNavigate }) {
   const safeValue = (value) => (typeof value === 'number' ? value : 0)
 
   const buildDerivedMetric = (values = []) => {
-    const normalizedValues = (values || []).map((value) => safeValue(value))
+    const normalizedValues = (values || []).map((value) => safeValue(value)).filter((value) => value > 0)
     if (!normalizedValues.length) {
       return {
         total: 0,
@@ -176,7 +226,9 @@ function GroupsPage({ onNavigate }) {
       return <small className="delta-neutral">— pas de période précédente</small>
     }
 
-    const deltaValue = typeof metric?.variation_pct === 'number' ? `${metric.variation_pct.toFixed(1)} %` : '—'
+    const deltaValue = typeof metric?.variation_pct === 'number'
+      ? `${metric.variation_pct >= 0 ? '+' : ''}${metric.variation_pct.toFixed(1)} %`
+      : '—'
     const deltaClass = (metric?.variation_pct ?? 0) >= 0 ? 'delta-up' : 'delta-down'
     return <small className={deltaClass}>{deltaValue}{suffix}</small>
   }
@@ -186,7 +238,9 @@ function GroupsPage({ onNavigate }) {
       return <small className="delta-neutral">— pas de période précédente</small>
     }
 
-    const deltaValue = typeof metric?.mean_variation_pct === 'number' ? `${metric.mean_variation_pct.toFixed(1)} %` : '—'
+    const deltaValue = typeof metric?.mean_variation_pct === 'number'
+      ? `${metric.mean_variation_pct >= 0 ? '+' : ''}${metric.mean_variation_pct.toFixed(1)} %`
+      : '—'
     const deltaClass = (metric?.mean_variation_pct ?? 0) >= 0 ? 'delta-up' : 'delta-down'
     return <small className={deltaClass}>{deltaValue}{suffix}</small>
   }
@@ -194,18 +248,22 @@ function GroupsPage({ onNavigate }) {
   const loadGroupsData = async (queryParams = '') => {
     try {
       const response = await fetch(`/dashboard/groupes${queryParams ? `?${queryParams}` : ''}`)
+      if (!response.ok) {
+        throw new Error(`Backend error ${response.status}`)
+      }
       const data = await response.json()
+      const reportChoices = data.rapport_choices || data.report_choices || []
       setGroupsData(data)
-      setRapportDebut(data.selected_rapport_debut ?? '')
-      setRapportFin(data.selected_rapport_fin ?? '')
-      setSiteId(data.selected_site_id ?? '')
+      setRapportDebut(data.selected_rapport_debut != null ? String(data.selected_rapport_debut) : String(reportChoices[0]?.id ?? ''))
+      setRapportFin(data.selected_rapport_fin != null ? String(data.selected_rapport_fin) : String(reportChoices[reportChoices.length - 1]?.id ?? ''))
+      setSiteId(data.selected_site_id != null ? String(data.selected_site_id) : String(data.sites?.[0]?.id ?? ''))
     } catch (error) {
       console.warn('Groups backend unavailable, using demo fallback data.', error)
       setGroupsData({
         period_label: 'Période de démonstration',
         previous_period_label: null,
         selected_site_id: 1,
-        report_choices: [{ id: 1, label: '01/01 au 07/01' }, { id: 2, label: '08/01 au 14/01' }],
+        rapport_choices: [{ id: 1, label: '01/01 au 07/01' }, { id: 2, label: '08/01 au 14/01' }],
         sites: [{ id: 1, nom_site: 'BUF Bepanda' }],
         site_hours: { total: 140.0, mean: 28.0, previous_total: 120.0, previous_mean: 24.0, variation_pct: 16.7, mean_variation_pct: 16.7, all_time_mean: 27.0, all_time_stddev: 5.2, has_previous_period: true },
         site_consumption: { total: 560.0, mean: 112.0, previous_total: 500.0, previous_mean: 100.0, variation_pct: 12.0, mean_variation_pct: 12.0, all_time_mean: 105.0, all_time_stddev: 9.8, has_previous_period: true },
@@ -319,6 +377,7 @@ function GroupsPage({ onNavigate }) {
         const hourlyValues = (block.hours_run || []).map((hours, index) => {
           const hoursValue = safeValue(hours)
           const consumptionValue = safeValue((block.consumption || block.consommation || [])[index])
+          // Consommation horaire = consommation / heures de fonctionnement ; si l'heure est nulle, la courbe vaut 0.
           return hoursValue > 0 ? Number((consumptionValue / hoursValue).toFixed(2)) : 0
         })
 
@@ -373,7 +432,7 @@ function GroupsPage({ onNavigate }) {
                 <label htmlFor="rapport_debut">Rapport début</label>
                 <select id="rapport_debut" value={rapportDebut} onChange={(event) => setRapportDebut(event.target.value)}>
                   {(groupsData.rapport_choices || []).map((choice) => (
-                    <option key={choice.id} value={choice.id}>{choice.label}</option>
+                    <option key={choice.id} value={String(choice.id)}>{choice.label}</option>
                   ))}
                 </select>
               </div>
@@ -381,7 +440,7 @@ function GroupsPage({ onNavigate }) {
                 <label htmlFor="rapport_fin">Rapport fin</label>
                 <select id="rapport_fin" value={rapportFin} onChange={(event) => setRapportFin(event.target.value)}>
                   {(groupsData.rapport_choices || []).map((choice) => (
-                    <option key={choice.id} value={choice.id}>{choice.label}</option>
+                    <option key={choice.id} value={String(choice.id)}>{choice.label}</option>
                   ))}
                 </select>
               </div>
@@ -389,7 +448,7 @@ function GroupsPage({ onNavigate }) {
                 <label htmlFor="site_id">Site</label>
                 <select id="site_id" value={siteId} onChange={(event) => setSiteId(event.target.value)}>
                   {(groupsData.sites || []).map((site) => (
-                    <option key={site.id} value={site.id}>{site.nom_site}</option>
+                    <option key={site.id} value={String(site.id)}>{site.nom_site}</option>
                   ))}
                 </select>
               </div>
@@ -427,7 +486,10 @@ function GroupsPage({ onNavigate }) {
 
             <section className="groups-list">
               {groupsData.group_blocks?.map((group) => (
-                <article key={group.id} className="group-card" style={{ borderLeft: `4px solid ${group.color || '#0b3d7a'}` }}>
+                <article key={group.id} className="group-card" style={{ position: 'relative', borderLeft: `4px solid ${group.color || '#0b3d7a'}` }}>
+                  <div style={{ position: 'absolute', top: '1rem', right: '1rem', backgroundColor: '#fde047', color: '#0b3d91', padding: '0.6rem 0.9rem', borderRadius: '999px', fontWeight: 700, boxShadow: '0 12px 20px rgba(0,0,0,0.08)', zIndex: 1 }}>
+                    Autonomie {group.autonomie_hours != null ? `${group.autonomie_hours.toFixed(1)} h` : '—'}
+                  </div>
                   <div className="group-card-head">
                     <span className="metric-label">Groupe</span>
                     <h3>{group.label}</h3>
@@ -456,7 +518,7 @@ function GroupsPage({ onNavigate }) {
                           <span>Écart type</span>
                           <strong>{group.hours?.all_time_stddev?.toFixed(1) ?? '—'} h</strong>
                         </div>
-                      </div>
+                      </div> 
                     </div>
 
                     <div className="metric-stat-block">
@@ -582,7 +644,7 @@ function CuvesPage({ onNavigate }) {
   const [cuvesData, setCuvesData] = useState(null)
   const [rapportDebut, setRapportDebut] = useState('')
   const [rapportFin, setRapportFin] = useState('')
-  const [siteId, setSiteId] = useState('')
+  const [siteId, setSiteId] = useState(null)
 
   const renderDelta = (metric, suffix = '') => {
     if (metric?.has_previous_period === false) {
@@ -611,7 +673,7 @@ function CuvesPage({ onNavigate }) {
       setCuvesData(data)
       setRapportDebut(data.selected_rapport_debut ?? '')
       setRapportFin(data.selected_rapport_fin ?? '')
-      setSiteId(data.selected_site_id ?? '')
+      setSiteId(data.selected_site_id != null ? String(data.selected_site_id) : '')
     } catch (error) {
       console.warn('Cuves backend unavailable, using demo fallback data.', error)
       setCuvesData({
@@ -751,7 +813,7 @@ function CuvesPage({ onNavigate }) {
               </div>
               <div className="filter-field">
                 <label htmlFor="cuves-site">Site</label>
-                <select id="cuves-site" value={siteId} onChange={(event) => setSiteId(event.target.value)}>
+                <select id="cuves-site" value={siteId ?? ''} onChange={(event) => setSiteId(event.target.value)}>
                   {(cuvesData.sites || []).map((site) => (
                     <option key={site.id} value={site.id}>{site.nom_site}</option>
                   ))}
@@ -922,7 +984,7 @@ function SitePage({ onNavigate }) {
   const [siteDashboard, setSiteDashboard] = useState(null)
   const [startIdx, setStartIdx] = useState(0)
   const [endIdx, setEndIdx] = useState(0)
-  const [siteId, setSiteId] = useState('')
+  const [siteId, setSiteId] = useState(null)
 
   const safeValue = (value) => (typeof value === 'number' ? value : 0)
 
@@ -969,8 +1031,8 @@ function SitePage({ onNavigate }) {
       ])
 
       const siteSeries = metric2.sites_series || []
-      const siteHoursSeries = Object.values(metric3.sites_data || {}).map((site) => ({
-        id: site.id,
+      const siteHoursSeries = Object.entries(metric3.sites_data || {}).map(([siteKey, site]) => ({
+        id: Number(siteKey) || site.id,
         nom_site: site.nom_site,
         datasets: site.datasets,
       }))
@@ -981,6 +1043,7 @@ function SitePage({ onNavigate }) {
         volumeSeries: siteSeries,
         hoursSeries: siteHoursSeries,
         consumptionSeries: siteConsumptionSeries,
+        defaultSiteId: metric3.default_site_id,
       })
     } catch (error) {
       console.warn('Site backend unavailable, using demo fallback data.', error)
@@ -998,6 +1061,7 @@ function SitePage({ onNavigate }) {
           { id: 1, nom_site: 'BUF Bepanda', data: [230, 250, 270], color: '#0b3d7a' },
           { id: 2, nom_site: 'BUF Bonaberi', data: [190, 210, 215], color: '#3b82f6' },
         ],
+        defaultSiteId: 1,
       })
     }
   }
@@ -1006,22 +1070,35 @@ function SitePage({ onNavigate }) {
     loadSiteData()
   }, [])
 
+  const siteOptions = useMemo(() => {
+    if (!siteDashboard) {
+      return []
+    }
+
+    const volumeSites = (siteDashboard.volumeSeries || []).map((site) => ({ id: site.id, nom_site: site.nom_site }))
+    const consumptionSites = (siteDashboard.consumptionSeries || []).map((site) => ({ id: site.id, nom_site: site.nom_site }))
+    const hoursSites = (siteDashboard.hoursSeries || []).map((site) => ({ id: site.id, nom_site: site.nom_site }))
+
+    const byId = new Map()
+    ;[...volumeSites, ...consumptionSites, ...hoursSites].forEach((site) => byId.set(String(site.id), site))
+    return [...byId.values()]
+  }, [siteDashboard])
+
   useEffect(() => {
     if (!siteDashboard) {
       return
     }
 
-    const options = siteDashboard.volumeSeries?.[0]?.id ? siteDashboard.volumeSeries : siteDashboard.consumptionSeries
-    const fallbackId = options?.[0]?.id ?? ''
-    if (!siteId && fallbackId) {
-      setSiteId(String(fallbackId))
+    const fallbackId = String(siteDashboard.defaultSiteId ?? siteOptions[0]?.id ?? '')
+    if ((siteId === null || siteId === '') && fallbackId) {
+      setSiteId(fallbackId)
     }
 
     if (startIdx === endIdx && siteDashboard.labels?.length) {
       setStartIdx(0)
       setEndIdx(siteDashboard.labels.length - 1)
     }
-  }, [siteDashboard, siteId, startIdx, endIdx])
+  }, [siteDashboard, siteOptions, siteId, startIdx, endIdx])
 
   const selectedSite = useMemo(() => {
     if (!siteDashboard) {
@@ -1068,20 +1145,6 @@ function SitePage({ onNavigate }) {
   const siteVolumeStats = windowStats(siteVolumeData, startIdx, endIdx)
   const siteConsumptionStats = windowStats(siteConsumptionData, startIdx, endIdx)
   const siteHoursStats = windowStats(siteHoursData, startIdx, endIdx)
-
-  const siteOptions = useMemo(() => {
-    if (!siteDashboard) {
-      return []
-    }
-
-    const volumeSites = (siteDashboard.volumeSeries || []).map((site) => ({ id: site.id, nom_site: site.nom_site }))
-    const consumptionSites = (siteDashboard.consumptionSeries || []).map((site) => ({ id: site.id, nom_site: site.nom_site }))
-    const hoursSites = (siteDashboard.hoursSeries || []).map((site) => ({ id: site.id, nom_site: site.nom_site }))
-
-    const byId = new Map()
-    ;[...volumeSites, ...consumptionSites, ...hoursSites].forEach((site) => byId.set(String(site.id), site))
-    return [...byId.values()]
-  }, [siteDashboard])
 
   useEffect(() => {
     if (!window.Chart || !siteDashboard || !selectedSite) {
@@ -1167,13 +1230,22 @@ function SitePage({ onNavigate }) {
     }
   }
 
+  if (!siteDashboard) {
+    return (
+      <div className="app-shell dashboard-shell">
+        <Topbar activeView="site" onNavigate={onNavigate} />
+        <main className="groups-grid">
+          <div className="loading-state">Chargement des données du site...</div>
+        </main>
+      </div>
+    )
+  }
+
   return (
     <div className="app-shell dashboard-shell">
       <Topbar activeView="site" onNavigate={onNavigate} />
 
       <main className="groups-grid">
-        {siteDashboard && (
-          <>
             <form className="groups-filter-bar" onSubmit={applyFilters}>
               <div className="filter-field">
                 <label htmlFor="site-start">Rapport début</label>
@@ -1193,7 +1265,7 @@ function SitePage({ onNavigate }) {
               </div>
               <div className="filter-field">
                 <label htmlFor="site-select">Site</label>
-                <select id="site-select" value={siteId} onChange={(event) => setSiteId(event.target.value)}>
+                <select id="site-select" value={siteId ?? ''} onChange={(event) => setSiteId(event.target.value)}>
                   {siteOptions.map((site) => (
                     <option key={site.id} value={site.id}>{site.nom_site}</option>
                   ))}
@@ -1293,11 +1365,9 @@ function SitePage({ onNavigate }) {
                 </article>
               </div>
             </section>
-          </>
-        )}
-      </main>
-    </div>
-  )
+        </main>
+      </div>
+    )
 }
 
 function DashboardPage({ onNavigate }) {
@@ -1332,12 +1402,12 @@ function DashboardPage({ onNavigate }) {
             labels: metric1.cp_chart_labels,
             values: metric1.cp_chart_pcts,
             quantities: metric1.cp_chart_quantities,
-            dailySeries: metric1.sites_cj_chart_data,
+            dailySeries: metric1.sites_cj_chart_data || {},
           },
           metric2: {
-            labels: metric2.labels,
-            globalVolumes: metric2.global_volumes,
-            siteSeries: metric2.sites_series,
+            labels: metric4.labels,
+            globalConsumption: metric4.global_consumption,
+            siteSeries: metric4.sites_series,
           },
           metric3: {
             labels: metric3.labels,
@@ -1345,9 +1415,9 @@ function DashboardPage({ onNavigate }) {
             sitesData: metric3.sites_data,
           },
           metric4: {
-            labels: metric4.labels,
-            globalConsumption: metric4.global_consumption,
-            siteSeries: metric4.sites_series,
+            labels: metric2.labels,
+            globalVolumes: metric2.global_volumes,
+            siteSeries: metric2.sites_series,
           },
         })
       } catch (error) {
@@ -1374,9 +1444,9 @@ function DashboardPage({ onNavigate }) {
 
     const charts = []
     const labels = sliceRange(dashboardData.metric2.labels)
-    const globalVolumesRange = sliceRange(dashboardData.metric2.globalVolumes)
+    const globalConsumptionRange = sliceRange(dashboardData.metric2.globalConsumption)
+    const globalVolumesRange = sliceRange(dashboardData.metric4.globalVolumes)
     const globalHoursRange = sliceRange(dashboardData.metric3.globalHours)
-    const globalConsumptionRange = sliceRange(dashboardData.metric4.globalConsumption)
 
     const createLineChart = (id, data, label, color, labelsForChart, fill = false) => {
       const ctx = document.getElementById(id)
@@ -1413,7 +1483,8 @@ function DashboardPage({ onNavigate }) {
       charts.push(chart)
     }
 
-    const createBarChart = (id, data, label, labelsForChart, color) => {
+    // Formule de la métrique 1 : pourcentage de remplissage = volume courant / capacité × 100.
+    const createBarChart = (id, data, label, labelsForChart, color, tooltipFormatter) => {
       const ctx = document.getElementById(id)
       if (!ctx) return
 
@@ -1433,7 +1504,14 @@ function DashboardPage({ onNavigate }) {
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                label: tooltipFormatter || ((context) => ` ${context.parsed.y.toLocaleString('fr-FR')} ${label}`),
+              },
+            },
+          },
           scales: {
             x: { ticks: { color: chartPalette.text }, grid: { display: false } },
             y: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
@@ -1444,22 +1522,33 @@ function DashboardPage({ onNavigate }) {
       charts.push(chart)
     }
 
-    createBarChart('chart-metric-1', dashboardData.metric1.values, 'Niveau des cuves (%)', dashboardData.metric1.labels, '#0b3d7a')
+    createBarChart('chart-metric-1', dashboardData.metric1.values, 'Cuves principales (% remplissage)', dashboardData.metric1.labels, '#0b3d7a', (context) => {
+      const index = context.dataIndex
+      const quantity = dashboardData.metric1.quantities?.[index] ?? 0
+      return ` ${context.parsed.y.toFixed(1)} % • ${quantity.toLocaleString('fr-FR')} L`
+    })
 
-    const dailySeriesEntries = Object.entries(dashboardData.metric1.dailySeries || {})
-    const dailySeries = dailySeriesEntries[0]?.[1]
-    if (dailySeries) {
+    // Formule de la métrique 1 (journalier) : taux de remplissage des cuves journalières.
+    const flattenedDailySeries = Object.entries(dashboardData.metric1.dailySeries || {}).flatMap(([siteId, siteSeries]) =>
+      (siteSeries.labels || []).map((label, index) => ({
+        label: `${siteId} · ${label}`,
+        value: siteSeries.percentages?.[index] ?? 0,
+        color: siteSeries.colors?.[index] || '#0b3d7a',
+      })),
+    )
+
+    if (flattenedDailySeries.length) {
       const dailyCtx = document.getElementById('chart-metric-1-daily')
       if (dailyCtx) {
         const dailyChart = new Chart(dailyCtx, {
           type: 'bar',
           data: {
-            labels: dailySeries.labels || [],
+            labels: flattenedDailySeries.map((item) => item.label),
             datasets: [
               {
-                label: 'Volume journalier (L)',
-                data: dailySeries.quantities || [],
-                backgroundColor: dailySeries.colors || ['#0b3d7a'],
+                label: 'Cuves journalières visibles (% remplissage)',
+                data: flattenedDailySeries.map((item) => item.value),
+                backgroundColor: flattenedDailySeries.map((item) => item.color),
                 borderRadius: 8,
               },
             ],
@@ -1478,9 +1567,12 @@ function DashboardPage({ onNavigate }) {
       }
     }
 
-    createLineChart('chart-metric-2', globalVolumesRange, 'Volume total global', '#0b3d7a', labels, true)
+    // Formule de la métrique 2 : consommation totale = somme des consommations sur la période sélectionnée.
+    createLineChart('chart-metric-2', globalConsumptionRange, 'Consommation totale (L)', '#0b3d7a', labels, true)
+    // Formule de la métrique 3 : différence horaire = compteur_i - compteur_{i-1}, puis consommation = delta × débit L/h.
     createLineChart('chart-metric-3', globalHoursRange, 'Écart horaire global', '#3b82f6', labels, true)
-    createLineChart('chart-metric-4', globalConsumptionRange, 'Consommation globale', '#60a5fa', labels, true)
+    // Formule de la métrique 4 : volume total = somme des volumes des cuves principales et journalières sur la période.
+    createLineChart('chart-metric-4', globalVolumesRange, 'Volume total dans les cuves (L)', '#60a5fa', labels, true)
 
     const siteVolumeCtx = document.getElementById('chart-metric-2-sites')
     if (siteVolumeCtx) {
@@ -1584,12 +1676,14 @@ function DashboardPage({ onNavigate }) {
 
       <main className="dashboard-grid">
         <section className="dashboard-cards">
-          <MetricPanel label="Métrique 1" title="Cuves principales">
+          <MetricPanel label="Volume actuel des cuves" title="Volume actuel des cuves">
             <div className="metric-stack">
               <div className="chart-box fixed-box">
+                <span className="curve-title">Principales cuves (% remplissage)</span>
                 <canvas id="chart-metric-1" />
               </div>
               <div className="chart-box fixed-box">
+                <span className="curve-title">Diagramme des cuves journalières visibles</span>
                 <canvas id="chart-metric-1-daily" />
               </div>
             </div>
@@ -1616,7 +1710,7 @@ function DashboardPage({ onNavigate }) {
             </div>
           )}
 
-          <MetricPanel label="Métrique 2" title="Quantité de carburant dans les cuves">
+          <MetricPanel label="Métrique 2" title="Quantité de carburant totale consommée">
             <div className="metric-split-grid">
               <div className="chart-box fixed-box">
                 <canvas id="chart-metric-2" />
@@ -1627,7 +1721,7 @@ function DashboardPage({ onNavigate }) {
             </div>
           </MetricPanel>
 
-          <MetricPanel label="Métrique 3" title="Variations horaires">
+          <MetricPanel label="Métrique 3" title="Variations horaires totales">
             <div className="metric-split-grid">
               <div className="chart-box fixed-box">
                 <canvas id="chart-metric-3" />
@@ -1638,7 +1732,7 @@ function DashboardPage({ onNavigate }) {
             </div>
           </MetricPanel>
 
-          <MetricPanel label="Métrique 4" title="Consommation">
+          <MetricPanel label="Métrique 4" title="Volume total dans les cuves">
             <div className="metric-split-grid">
               <div className="chart-box fixed-box">
                 <canvas id="chart-metric-4" />

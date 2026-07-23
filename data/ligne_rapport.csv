@@ -14,7 +14,7 @@ id_ligne,id_rapport,id_cuve_principale,id_cuve_journaliere,id_groupe,quantite_ga
 9113,9001,1012,2013,3013,320,,1974,0,F,RAS
 9114,9001,1013,2014,3014,530,,19,0,F,RAS
 9115,9001,1014,2015,3015,650,,1164,0,P,Batterie HS ; Pas de chargeur batterie ;
-9116,9001,1015,2016,3016,750,,73,0,F,GES en défaut (en arrêt pour le moment
+9116,9001,1015,2016,3016,750,,73,0,F,GES en défaut (en arrêt pour le moment)
 9117,9001,1016,2017,3017,600,,1626,0,F,RAS
 9118,9001,1017,2018,3018,500,,896,0,F,RAS
 9119,9001,1018,2019,3019,710,,,0,P,Compteur horaire Illisible sur le contrôleur du GES
@@ -45,7 +45,7 @@ id_ligne,id_rapport,id_cuve_principale,id_cuve_journaliere,id_groupe,quantite_ga
 9144,9002,1012,2013,3013,320,,1974,0,F,RAS
 9145,9002,1013,2014,3014,530,,19,0,F,RAS
 9146,9002,1014,2015,3015,650,,1164,0,P,Batterie HS ; Pas de chargeur batterie ;
-9147,9002,1015,2016,3016,750,,73,0,F,GES en défaut (en arrêt pour le moment
+9147,9002,1015,2016,3016,750,,73,0,F,GES en défaut en arrêt pour le moment
 9148,9002,1016,2017,3017,600,,1626,0,F,RAS
 9149,9002,1017,2018,3018,500,,896,0,F,RAS
 9150,9002,1018,2019,3019,710,,,0,P,Compteur horaire Illisible sur le contrôleur du GES

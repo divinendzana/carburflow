@@ -34,5 +34,5 @@ class RapportAdmin(admin.ModelAdmin):
 
 @admin.register(LigneRapport)
 class LigneRapportAdmin(admin.ModelAdmin):
-    list_display = ('id', 'rapport', 'cuve_principale', 'cuve_journaliere', 'groupe', 'etat_fonctionnement')
+    list_display = ('id', 'rapport', 'cuve_principale', 'cuve_journaliere', 'groupe', 'depotage', 'etat_fonctionnement')
     list_filter = ('rapport', 'etat_fonctionnement')

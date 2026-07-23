@@ -57,8 +57,11 @@ def get_etat_cuves_context(selected_site_id=None):
         site_cp_cap = 0.0
 
         for cp in site.cuves_principales.all():
-            qty_cp = lignes_by_cp.get(cp.id, 0.0)
             cap_cp = cp.capacite
+            if cap_cp is None or cap_cp <= 0:
+                continue
+
+            qty_cp = lignes_by_cp.get(cp.id, 0.0)
             pct_cp = round((qty_cp / cap_cp) * 100, 1) if cap_cp > 0 else 0.0
             pct_cp_clamped = min(100.0, max(0.0, pct_cp))
 
@@ -97,8 +100,11 @@ def get_etat_cuves_context(selected_site_id=None):
         cj_list = []
         for cp in site.cuves_principales.all():
             for cj in cp.cuves_journalieres.all():
-                qty_cj = lignes_by_cj.get(cj.id, 0.0)
                 cap_cj = cj.capacite
+                if cap_cj is None or cap_cj <= 0:
+                    continue
+
+                qty_cj = lignes_by_cj.get(cj.id, 0.0)
                 pct_cj = round((qty_cj / cap_cj) * 100, 1) if cap_cj > 0 else 0.0
                 pct_cj_clamped = min(100.0, max(0.0, pct_cj))
 
@@ -188,7 +194,7 @@ def get_etat_cuves_context(selected_site_id=None):
 
 
 def get_evolution_volumes_context():
-    """Calcul des données de métrique #2 : Courbe d'évolution du volume total."""
+    """Calcul des données de métrique #4 : Courbe d'évolution du volume total dans les cuves."""
     reports = list(Rapport.objects.order_by('date_debut', 'id'))
     labels = [
         f"{r.date_debut.strftime('%d/%m')} au {r.date_fin.strftime('%d/%m')}"
@@ -206,6 +212,7 @@ def get_evolution_volumes_context():
         r_total = 0.0
         for s in sites:
             site_lignes = lignes.filter(cuve_principale__site=s)
+            # Formule de la métrique 4 : volume total dans les cuves = somme des volumes des cuves principales + journalières.
             cp_vol = site_lignes.aggregate(sum=Sum('quantite_gasoil_cuve_principale'))['sum'] or 0.0
             cj_vol = site_lignes.aggregate(sum=Sum('quantite_gasoil_cuve_journaliere'))['sum'] or 0.0
             tot = cp_vol + cj_vol
@@ -252,6 +259,8 @@ def get_evolution_volumes_context():
         'sites_series': sites_series_sorted,
         'sites_series_json': json.dumps([
             {
+                'id': item['id'],
+                'nom_site': item['nom_site'],
                 'label': item['nom_site'],
                 'data': item['data'],
                 'borderColor': item['color'],
@@ -372,10 +381,10 @@ def get_horaires_groupes_context():
 
 
 def get_consommation_context():
-    """Calcul de la métrique #4 : Consommation totale de carburant.
-    - Courbe globale : somme des consommations de tous les groupes par période de rapport.
+    """Calcul de la métrique #2 : quantité totale de carburant consommée.
+    - Courbe globale : somme des consommations de tous les sites par période de rapport.
     - Courbes par site : agrégation des séries de sites sous forme Max / Médiane / Min.
-    Consommation = delta compteur horaire × consommation horaire (L/h) du groupe.
+    Formule de consommation : stock précédent + dépotages - stock actuel.
     """
     reports = list(Rapport.objects.order_by('date_debut', 'id'))
     labels = [
@@ -383,53 +392,44 @@ def get_consommation_context():
         for r in reports
     ]
 
-    sites = list(Site.objects.prefetch_related(
-        'cuves_principales__cuves_journalieres__groupes_electrogenes'
-    ).all())
-
-    groupe_to_site = {}
-    groupe_rates = {}
-    all_groupe_ids = set()
-    for site in sites:
-        for cp in site.cuves_principales.all():
-            for cj in cp.cuves_journalieres.all():
-                for g in cj.groupes_electrogenes.all():
-                    all_groupe_ids.add(g.id)
-                    groupe_to_site[g.id] = site.id
-                    groupe_rates[g.id] = g.consommation_horaire
-
-    groupe_compteurs = {g_id: [] for g_id in all_groupe_ids}
-    last_known = {g_id: 0.0 for g_id in all_groupe_ids}
-
-    for r in reports:
-        lignes = LigneRapport.objects.filter(rapport=r)
-        report_compteurs = {}
-        for l in lignes:
-            if l.groupe_id:
-                existing = report_compteurs.get(l.groupe_id, 0.0)
-                report_compteurs[l.groupe_id] = max(existing, l.compteur_horaire)
-
-        for g_id in all_groupe_ids:
-            if g_id in report_compteurs and report_compteurs[g_id] > 0:
-                last_known[g_id] = report_compteurs[g_id]
-            groupe_compteurs[g_id].append(last_known[g_id])
+    sites = list(Site.objects.all())
 
     site_consumption = {s.id: [0.0] * len(reports) for s in sites}
     global_consumption = [0.0] * len(reports)
 
-    for g_id in all_groupe_ids:
-        compteurs = groupe_compteurs[g_id]
-        rate = groupe_rates.get(g_id, 0.0)
-        site_id = groupe_to_site.get(g_id)
-        for i in range(1, len(compteurs)):
-            prev_val = compteurs[i - 1]
-            if prev_val <= 0:
+    report_site_totals = []
+    report_site_depotages = []
+
+    for r in reports:
+        lignes = LigneRapport.objects.filter(rapport=r)
+        site_totals = {s.id: 0.0 for s in sites}
+        site_depotages = {s.id: 0.0 for s in sites}
+
+        for line in lignes:
+            site_id = None
+            if line.cuve_principale_id is not None and line.cuve_principale_id:
+                site_id = line.cuve_principale.site_id
+            elif line.cuve_journaliere_id is not None and line.cuve_journaliere_id:
+                site_id = line.cuve_journaliere.cuve_principale.site_id
+
+            if site_id is None:
                 continue
-            delta_h = max(0.0, compteurs[i] - prev_val)
-            consumed = round(delta_h * rate, 1)
-            global_consumption[i] += consumed
-            if site_id:
-                site_consumption[site_id][i] += consumed
+
+            # Formule de consommation : stock précédent + dépotages - stock actuel.
+            site_totals[site_id] += line.quantite_gasoil_cuve_principale + line.quantite_gasoil_cuve_journaliere
+            site_depotages[site_id] += line.depotage
+
+        report_site_totals.append(site_totals)
+        report_site_depotages.append(site_depotages)
+
+    for site in sites:
+        for idx in range(1, len(reports)):
+            previous_stock = report_site_totals[idx - 1].get(site.id, 0.0)
+            current_stock = report_site_totals[idx].get(site.id, 0.0)
+            depotages = report_site_depotages[idx].get(site.id, 0.0)
+            consumed = round(max(0.0, previous_stock + depotages - current_stock), 1)
+            site_consumption[site.id][idx] = consumed
+            global_consumption[idx] += consumed
 
     per_report_distrib = []
     for idx in range(len(reports)):
@@ -473,6 +473,8 @@ def get_consommation_context():
         'consommation_sites_series': sites_series_sorted,
         'consommation_sites_series_json': json.dumps([
             {
+                'id': item['id'],
+                'nom_site': item['nom_site'],
                 'label': item['nom_site'],
                 'data': item['data'],
                 'borderColor': item['color'],
@@ -548,12 +550,15 @@ class EtatCuvesAPIView(APIView):
         context = get_etat_cuves_context(selected_site_id=site_id)
         latest_rapport = context['latest_rapport']
 
+        group_count = GroupeElectrogene.objects.count()
+
         return Response({
             'dernier_rapport': {
                 'id_rapport': latest_rapport.id if latest_rapport else None,
                 'date_debut': latest_rapport.date_debut if latest_rapport else None,
                 'date_fin': latest_rapport.date_fin if latest_rapport else None,
             },
+            'groupes_count': group_count,
             'active_site_id': context['active_site_id'],
             'total_volume_global': context['total_volume_global'],
             'total_capacity_global': context['total_capacity_global'],
@@ -663,6 +668,7 @@ class GroupesDashboardAPIView(APIView):
                     'hours': b['hours_stats'],
                     'consumption': json.loads(b['consumption_json']),
                     'consumption_stats': b['consumption_stats'],
+                    'autonomie_hours': b.get('autonomie_hours'),
                     'compteurs': json.loads(b['compteurs_json']),
                     'hours_run': json.loads(b['hours_run_json']),
                 }
