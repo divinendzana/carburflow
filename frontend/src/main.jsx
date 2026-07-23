@@ -63,6 +63,7 @@ function Topbar({ activeView, onNavigate }) {
       <nav className="topbar-actions" aria-label="Navigation principale">
         <button type="button" className={`nav-link ${activeView === 'presentation' ? 'active' : ''}`} onClick={() => onNavigate('presentation')}>Présentation</button>
         <button type="button" className={`nav-link ${activeView === 'dashboard' ? 'active' : ''}`} onClick={() => onNavigate('dashboard')}>Dashboard</button>
+        <button type="button" className={`nav-link ${activeView === 'site' ? 'active' : ''}`} onClick={() => onNavigate('site')}>Site</button>
         <button type="button" className={`nav-link ${activeView === 'groups' ? 'active' : ''}`} onClick={() => onNavigate('groups')}>Groupes</button>
       </nav>
     </header>
@@ -125,6 +126,26 @@ function GroupsPage({ onNavigate }) {
   const [rapportFin, setRapportFin] = useState('')
   const [siteId, setSiteId] = useState('')
 
+  const renderDelta = (metric, suffix = '') => {
+    if (metric?.has_previous_period === false) {
+      return <small className="delta-neutral">— pas de période précédente</small>
+    }
+
+    const deltaValue = typeof metric?.variation_pct === 'number' ? `${metric.variation_pct.toFixed(1)} %` : '—'
+    const deltaClass = (metric?.variation_pct ?? 0) >= 0 ? 'delta-up' : 'delta-down'
+    return <small className={deltaClass}>{deltaValue}{suffix}</small>
+  }
+
+  const renderMeanDelta = (metric, suffix = '') => {
+    if (metric?.has_previous_period === false) {
+      return <small className="delta-neutral">— pas de période précédente</small>
+    }
+
+    const deltaValue = typeof metric?.mean_variation_pct === 'number' ? `${metric.mean_variation_pct.toFixed(1)} %` : '—'
+    const deltaClass = (metric?.mean_variation_pct ?? 0) >= 0 ? 'delta-up' : 'delta-down'
+    return <small className={deltaClass}>{deltaValue}{suffix}</small>
+  }
+
   const loadGroupsData = async (queryParams = '') => {
     try {
       const response = await fetch(`/dashboard/groupes${queryParams ? `?${queryParams}` : ''}`)
@@ -141,8 +162,8 @@ function GroupsPage({ onNavigate }) {
         selected_site_id: 1,
         report_choices: [{ id: 1, label: '01/01 au 07/01' }, { id: 2, label: '08/01 au 14/01' }],
         sites: [{ id: 1, nom_site: 'BUF Bepanda' }],
-        site_hours: { total: 140.0, mean: 28.0, previous_total: 120.0, previous_mean: 24.0, variation_pct: 16.7, all_time_mean: 27.0, has_previous_period: true },
-        site_consumption: { total: 560.0, mean: 112.0, previous_total: 500.0, previous_mean: 100.0, variation_pct: 12.0, all_time_mean: 105.0, has_previous_period: true },
+        site_hours: { total: 140.0, mean: 28.0, previous_total: 120.0, previous_mean: 24.0, variation_pct: 16.7, mean_variation_pct: 16.7, all_time_mean: 27.0, all_time_stddev: 5.2, has_previous_period: true },
+        site_consumption: { total: 560.0, mean: 112.0, previous_total: 500.0, previous_mean: 100.0, variation_pct: 12.0, mean_variation_pct: 12.0, all_time_mean: 105.0, all_time_stddev: 9.8, has_previous_period: true },
         labels: ['01/01 au 07/01', '08/01 au 14/01'],
         group_blocks: [
           {
@@ -152,8 +173,8 @@ function GroupsPage({ onNavigate }) {
             puissance: '250kVA',
             rate: 15.5,
             color: '#0d6efd',
-            hours: { total: 29.5, mean: 7.4, previous_total: null, previous_mean: null, variation_pct: null, all_time_mean: 14.8, has_previous_period: false },
-            consumption_stats: { total: 457.3, mean: 114.3, previous_total: null, previous_mean: null, variation_pct: null, all_time_mean: 228.7, has_previous_period: false },
+            hours: { total: 29.5, mean: 7.4, previous_total: null, previous_mean: null, variation_pct: null, mean_variation_pct: null, all_time_mean: 14.8, all_time_stddev: 3.6, has_previous_period: false },
+            consumption_stats: { total: 457.3, mean: 114.3, previous_total: null, previous_mean: null, variation_pct: null, mean_variation_pct: null, all_time_mean: 228.7, all_time_stddev: 43.2, has_previous_period: false },
             hours_run: [15, 17],
             consumption: [95, 115],
             compteurs: [240, 300],
@@ -307,41 +328,24 @@ function GroupsPage({ onNavigate }) {
               </div>
               <div className="summary-strip">
                 <div className="summary-chip">
-                  <span>Écarts horaires — Total période</span>
+                  <span>Variation horaire sur la période</span>
                   <strong>{siteHours.total?.toFixed(1) ?? '—'} h</strong>
-                  <small>{siteHours.has_previous_period ? `${siteHours.variation_pct?.toFixed(1) ?? '—'} %` : '— pas de période précédente'}</small>
+                  {renderDelta(siteHours)}
                 </div>
                 <div className="summary-chip">
-                  <span>Écarts horaires — Moyenne / période</span>
+                  <span>Variation horaire moyenne sur la période</span>
                   <strong>{siteHours.mean?.toFixed(1) ?? '—'} h</strong>
-                  <small>Moy. par rapport dans la fenêtre</small>
+                  {renderMeanDelta(siteHours)}
                 </div>
                 <div className="summary-chip">
-                  <span>Consommation — Total période</span>
+                  <span>Variation consommation sur la période</span>
                   <strong>{siteConsumption.total?.toFixed(1) ?? '—'} L</strong>
-                  <small>{siteConsumption.has_previous_period ? `${siteConsumption.variation_pct?.toFixed(1) ?? '—'} %` : '— pas de période précédente'}</small>
+                  {renderDelta(siteConsumption)}
                 </div>
                 <div className="summary-chip">
-                  <span>Consommation — Moyenne / période</span>
+                  <span>Variation consommation moyenne sur la période</span>
                   <strong>{siteConsumption.mean?.toFixed(1) ?? '—'} L</strong>
-                  <small>Moy. par rapport dans la fenêtre</small>
-                </div>
-              </div>
-            </section>
-
-            <section className="metric-section">
-              <div className="section-title-wrap">
-                <span className="metric-label">Moyennes absolues</span>
-                <h2>{selectedSite?.nom_site || 'Site'} (depuis le 1er rapport)</h2>
-              </div>
-              <div className="absolute-strip">
-                <div className="summary-chip">
-                  <span>Horaires moyens / période</span>
-                  <strong>{siteHours.all_time_mean?.toFixed(1) ?? '—'} h</strong>
-                </div>
-                <div className="summary-chip">
-                  <span>Consommation moyenne / période</span>
-                  <strong>{siteConsumption.all_time_mean?.toFixed(1) ?? '—'} L</strong>
+                  {renderMeanDelta(siteConsumption)}
                 </div>
               </div>
             </section>
@@ -362,19 +366,20 @@ function GroupsPage({ onNavigate }) {
                         <div>
                           <span>Total période</span>
                           <strong>{group.hours?.total?.toFixed(1) ?? '—'} h</strong>
-                          <small>{group.hours?.has_previous_period ? `${group.hours.variation_pct?.toFixed(1) ?? '—'} %` : '— pas de période précédente'}</small>
+                          {renderDelta(group.hours)}
                         </div>
                         <div>
                           <span>Moyenne</span>
                           <strong>{group.hours?.mean?.toFixed(1) ?? '—'} h</strong>
-                        </div>
-                        <div>
-                          <span>Total période préc.</span>
-                          <strong>{group.hours?.previous_total?.toFixed(1) ?? '—'} h</strong>
+                          {renderMeanDelta(group.hours)}
                         </div>
                         <div>
                           <span>Moy. absolue</span>
                           <strong>{group.hours?.all_time_mean?.toFixed(1) ?? '—'} h</strong>
+                        </div>
+                        <div>
+                          <span>Écart type absolu</span>
+                          <strong>{group.hours?.all_time_stddev?.toFixed(1) ?? '—'} h</strong>
                         </div>
                       </div>
                     </div>
@@ -385,19 +390,20 @@ function GroupsPage({ onNavigate }) {
                         <div>
                           <span>Total période</span>
                           <strong>{group.consumption_stats?.total?.toFixed(1) ?? '—'} L</strong>
-                          <small>{group.consumption_stats?.has_previous_period ? `${group.consumption_stats.variation_pct?.toFixed(1) ?? '—'} %` : '— pas de période précédente'}</small>
+                          {renderDelta(group.consumption_stats)}
                         </div>
                         <div>
                           <span>Moyenne</span>
                           <strong>{group.consumption_stats?.mean?.toFixed(1) ?? '—'} L</strong>
-                        </div>
-                        <div>
-                          <span>Total période préc.</span>
-                          <strong>{group.consumption_stats?.previous_total?.toFixed(1) ?? '—'} L</strong>
+                          {renderMeanDelta(group.consumption_stats)}
                         </div>
                         <div>
                           <span>Moy. absolue</span>
                           <strong>{group.consumption_stats?.all_time_mean?.toFixed(1) ?? '—'} L</strong>
+                        </div>
+                        <div>
+                          <span>Écart type absolu</span>
+                          <strong>{group.consumption_stats?.all_time_stddev?.toFixed(1) ?? '—'} L</strong>
                         </div>
                       </div>
                     </div>
@@ -419,6 +425,394 @@ function GroupsPage({ onNavigate }) {
                   </div>
                 </article>
               ))}
+            </section>
+          </>
+        )}
+      </main>
+    </div>
+  )
+}
+
+function SitePage({ onNavigate }) {
+  const chartPalette = useMemo(() => ({
+    axis: '#123d6d',
+    grid: 'rgba(11, 61, 122, 0.08)',
+    text: '#23466d',
+  }), [])
+
+  const [siteDashboard, setSiteDashboard] = useState(null)
+  const [startIdx, setStartIdx] = useState(0)
+  const [endIdx, setEndIdx] = useState(0)
+  const [siteId, setSiteId] = useState('')
+
+  const safeValue = (value) => (typeof value === 'number' ? value : 0)
+
+  const windowStats = (values = [], start, end) => {
+    const window = values.slice(start, end + 1)
+    const total = window.reduce((sum, value) => sum + safeValue(value), 0)
+    const mean = window.length ? total / window.length : 0
+
+    const prevWindowLength = end - start + 1
+    const prevStart = start - prevWindowLength
+    const prevEnd = start - 1
+    const prevWindow = prevStart >= 0 ? values.slice(prevStart, prevEnd + 1) : []
+    const prevTotal = prevWindow.reduce((sum, value) => sum + safeValue(value), 0)
+    const prevMean = prevWindow.length ? prevTotal / prevWindow.length : 0
+
+    const allTimeMean = values.length ? values.reduce((sum, value) => sum + safeValue(value), 0) / values.length : 0
+    const variance = values.length
+      ? values.reduce((sum, value) => sum + (safeValue(value) - allTimeMean) ** 2, 0) / values.length
+      : 0
+    const allTimeStddev = Math.sqrt(variance)
+
+    const variationPct = prevTotal === 0 ? null : ((total - prevTotal) / prevTotal) * 100
+    const meanVariationPct = prevMean === 0 ? null : ((mean - prevMean) / prevMean) * 100
+
+    return {
+      total: Number(total.toFixed(1)),
+      mean: Number(mean.toFixed(1)),
+      previous_total: prevWindow.length ? Number(prevTotal.toFixed(1)) : null,
+      previous_mean: prevWindow.length ? Number(prevMean.toFixed(1)) : null,
+      variation_pct: variationPct === null ? null : Number(variationPct.toFixed(1)),
+      mean_variation_pct: meanVariationPct === null ? null : Number(meanVariationPct.toFixed(1)),
+      all_time_mean: Number(allTimeMean.toFixed(1)),
+      all_time_stddev: Number(allTimeStddev.toFixed(1)),
+      has_previous_period: prevWindow.length > 0,
+    }
+  }
+
+  const loadSiteData = async () => {
+    try {
+      const [metric2, metric3, metric4] = await Promise.all([
+        fetch('/dashboard/evolution_volumes').then((response) => response.json()),
+        fetch('/dashboard/horaires_groupes').then((response) => response.json()),
+        fetch('/dashboard/consommation').then((response) => response.json()),
+      ])
+
+      const siteSeries = metric2.sites_series || []
+      const siteHoursSeries = Object.values(metric3.sites_data || {}).map((site) => ({
+        id: site.id,
+        nom_site: site.nom_site,
+        datasets: site.datasets,
+      }))
+      const siteConsumptionSeries = metric4.sites_series || []
+
+      setSiteDashboard({
+        labels: metric2.labels,
+        volumeSeries: siteSeries,
+        hoursSeries: siteHoursSeries,
+        consumptionSeries: siteConsumptionSeries,
+      })
+    } catch (error) {
+      console.warn('Site backend unavailable, using demo fallback data.', error)
+      setSiteDashboard({
+        labels: ['01/01 au 07/01', '08/01 au 14/01', '15/01 au 21/01'],
+        volumeSeries: [
+          { id: 1, nom_site: 'BUF Bepanda', data: [400, 470, 510], color: '#0b3d7a' },
+          { id: 2, nom_site: 'BUF Bonaberi', data: [320, 360, 390], color: '#3b82f6' },
+        ],
+        hoursSeries: [
+          { id: 1, nom_site: 'BUF Bepanda', datasets: [{ label: 'G#100 (Perkins 250kVA)', data: [12, 14, 16] }] },
+          { id: 2, nom_site: 'BUF Bonaberi', datasets: [{ label: 'G#200 (Cummins 150kVA)', data: [8, 9, 10] }] },
+        ],
+        consumptionSeries: [
+          { id: 1, nom_site: 'BUF Bepanda', data: [230, 250, 270], color: '#0b3d7a' },
+          { id: 2, nom_site: 'BUF Bonaberi', data: [190, 210, 215], color: '#3b82f6' },
+        ],
+      })
+    }
+  }
+
+  useEffect(() => {
+    loadSiteData()
+  }, [])
+
+  useEffect(() => {
+    if (!siteDashboard) {
+      return
+    }
+
+    const options = siteDashboard.volumeSeries?.[0]?.id ? siteDashboard.volumeSeries : siteDashboard.consumptionSeries
+    const fallbackId = options?.[0]?.id ?? ''
+    if (!siteId && fallbackId) {
+      setSiteId(String(fallbackId))
+    }
+
+    if (startIdx === endIdx && siteDashboard.labels?.length) {
+      setStartIdx(0)
+      setEndIdx(siteDashboard.labels.length - 1)
+    }
+  }, [siteDashboard, siteId, startIdx, endIdx])
+
+  const selectedSite = useMemo(() => {
+    if (!siteDashboard) {
+      return null
+    }
+
+    const candidates = [
+      ...(siteDashboard.volumeSeries || []),
+      ...(siteDashboard.consumptionSeries || []),
+      ...(siteDashboard.hoursSeries || []),
+    ]
+
+    return candidates.find((entry) => String(entry.id) === String(siteId)) || candidates[0] || null
+  }, [siteDashboard, siteId])
+
+  const siteVolumeData = useMemo(() => {
+    if (!selectedSite || !siteDashboard?.volumeSeries?.length) {
+      return []
+    }
+
+    const candidate = siteDashboard.volumeSeries.find((entry) => String(entry.id) === String(selectedSite.id))
+    return candidate?.data || []
+  }, [selectedSite, siteDashboard])
+
+  const siteConsumptionData = useMemo(() => {
+    if (!selectedSite || !siteDashboard?.consumptionSeries?.length) {
+      return []
+    }
+
+    const candidate = siteDashboard.consumptionSeries.find((entry) => String(entry.id) === String(selectedSite.id))
+    return candidate?.data || []
+  }, [selectedSite, siteDashboard])
+
+  const siteHoursData = useMemo(() => {
+    if (!selectedSite || !siteDashboard?.hoursSeries?.length) {
+      return []
+    }
+
+    const candidate = siteDashboard.hoursSeries.find((entry) => String(entry.id) === String(selectedSite.id))
+    const datasets = candidate?.datasets || []
+    return datasets.flatMap((dataset) => dataset.data || [])
+  }, [selectedSite, siteDashboard])
+
+  const siteVolumeStats = windowStats(siteVolumeData, startIdx, endIdx)
+  const siteConsumptionStats = windowStats(siteConsumptionData, startIdx, endIdx)
+  const siteHoursStats = windowStats(siteHoursData, startIdx, endIdx)
+
+  const siteOptions = useMemo(() => {
+    if (!siteDashboard) {
+      return []
+    }
+
+    const volumeSites = (siteDashboard.volumeSeries || []).map((site) => ({ id: site.id, nom_site: site.nom_site }))
+    const consumptionSites = (siteDashboard.consumptionSeries || []).map((site) => ({ id: site.id, nom_site: site.nom_site }))
+    const hoursSites = (siteDashboard.hoursSeries || []).map((site) => ({ id: site.id, nom_site: site.nom_site }))
+
+    const byId = new Map()
+    ;[...volumeSites, ...consumptionSites, ...hoursSites].forEach((site) => byId.set(String(site.id), site))
+    return [...byId.values()]
+  }, [siteDashboard])
+
+  useEffect(() => {
+    if (!window.Chart || !siteDashboard || !selectedSite) {
+      return undefined
+    }
+
+    const charts = []
+    const labels = siteDashboard.labels || []
+    const createLineChart = (id, data, label, color, fill = false) => {
+      const ctx = document.getElementById(id)
+      if (!ctx) return
+
+      const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label,
+              data,
+              borderColor: color,
+              backgroundColor: fill ? `${color}22` : 'transparent',
+              borderWidth: 3,
+              tension: 0.35,
+              fill,
+              pointRadius: 4,
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: false } },
+          scales: {
+            x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
+            y: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
+          },
+        },
+      })
+
+      charts.push(chart)
+    }
+
+    createLineChart('chart-site-volume', siteVolumeData, 'Volume total', '#0b3d7a', true)
+    createLineChart('chart-site-hours', siteHoursData, 'Variation horaire', '#3b82f6', true)
+    createLineChart('chart-site-consumption', siteConsumptionData, 'Consommation', '#60a5fa', true)
+
+    return () => charts.forEach((chart) => chart.destroy())
+  }, [chartPalette, siteDashboard, selectedSite, siteVolumeData, siteHoursData, siteConsumptionData])
+
+  const renderDelta = (metric, suffix = '') => {
+    if (metric?.has_previous_period === false) {
+      return <small className="delta-neutral">— pas de période précédente</small>
+    }
+
+    const deltaValue = typeof metric?.variation_pct === 'number' ? `${metric.variation_pct.toFixed(1)} %` : '—'
+    const deltaClass = (metric?.variation_pct ?? 0) >= 0 ? 'delta-up' : 'delta-down'
+    return <small className={deltaClass}>{deltaValue}{suffix}</small>
+  }
+
+  const renderMeanDelta = (metric, suffix = '') => {
+    if (metric?.has_previous_period === false) {
+      return <small className="delta-neutral">— pas de période précédente</small>
+    }
+
+    const deltaValue = typeof metric?.mean_variation_pct === 'number' ? `${metric.mean_variation_pct.toFixed(1)} %` : '—'
+    const deltaClass = (metric?.mean_variation_pct ?? 0) >= 0 ? 'delta-up' : 'delta-down'
+    return <small className={deltaClass}>{deltaValue}{suffix}</small>
+  }
+
+  const applyFilters = (event) => {
+    event.preventDefault()
+    if (!siteDashboard?.labels?.length) {
+      return
+    }
+
+    const labels = siteDashboard.labels
+    const normalizedStart = Number(startIdx)
+    const normalizedEnd = Number(endIdx)
+    if (normalizedStart > normalizedEnd) {
+      setStartIdx(normalizedEnd)
+      setEndIdx(normalizedStart)
+    }
+  }
+
+  return (
+    <div className="app-shell dashboard-shell">
+      <Topbar activeView="site" onNavigate={onNavigate} />
+
+      <main className="groups-grid">
+        {siteDashboard && (
+          <>
+            <form className="groups-filter-bar" onSubmit={applyFilters}>
+              <div className="filter-field">
+                <label htmlFor="site-start">Rapport début</label>
+                <select id="site-start" value={startIdx} onChange={(event) => setStartIdx(Number(event.target.value))}>
+                  {siteDashboard.labels.map((label, index) => (
+                    <option key={`${label}-${index}`} value={index}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="filter-field">
+                <label htmlFor="site-end">Rapport fin</label>
+                <select id="site-end" value={endIdx} onChange={(event) => setEndIdx(Number(event.target.value))}>
+                  {siteDashboard.labels.map((label, index) => (
+                    <option key={`${label}-${index}`} value={index}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="filter-field">
+                <label htmlFor="site-select">Site</label>
+                <select id="site-select" value={siteId} onChange={(event) => setSiteId(event.target.value)}>
+                  {siteOptions.map((site) => (
+                    <option key={site.id} value={site.id}>{site.nom_site}</option>
+                  ))}
+                </select>
+              </div>
+              <button type="submit" className="filter-submit">Appliquer</button>
+            </form>
+
+            <section className="site-overview">
+              <div className="section-title-wrap">
+                <span className="metric-label">Rubrique site</span>
+                <h2>{selectedSite?.nom_site || 'Site'}</h2>
+              </div>
+              <div className="site-metric-grid">
+                <article className="metric-panel site-metric-card">
+                  <span className="metric-label">Variation horaire</span>
+                  <h3>Écart / période</h3>
+                  <div className="site-metric-stack">
+                    <div>
+                      <span>Total période</span>
+                      <strong>{siteHoursStats.total.toFixed(1)} h</strong>
+                      {renderDelta(siteHoursStats)}
+                    </div>
+                    <div>
+                      <span>Moyenne</span>
+                      <strong>{siteHoursStats.mean.toFixed(1)} h</strong>
+                      {renderMeanDelta(siteHoursStats)}
+                    </div>
+                    <div>
+                      <span>Moy. absolue</span>
+                      <strong>{siteHoursStats.all_time_mean.toFixed(1)} h</strong>
+                    </div>
+                    <div>
+                      <span>Écart type absolu</span>
+                      <strong>{siteHoursStats.all_time_stddev.toFixed(1)} h</strong>
+                    </div>
+                  </div>
+                  <div className="chart-box secondary-box">
+                    <canvas id="chart-site-hours" />
+                  </div>
+                </article>
+
+                <article className="metric-panel site-metric-card">
+                  <span className="metric-label">Consommation</span>
+                  <h3>Carburant / période</h3>
+                  <div className="site-metric-stack">
+                    <div>
+                      <span>Total période</span>
+                      <strong>{siteConsumptionStats.total.toFixed(1)} L</strong>
+                      {renderDelta(siteConsumptionStats)}
+                    </div>
+                    <div>
+                      <span>Moyenne</span>
+                      <strong>{siteConsumptionStats.mean.toFixed(1)} L</strong>
+                      {renderMeanDelta(siteConsumptionStats)}
+                    </div>
+                    <div>
+                      <span>Moy. absolue</span>
+                      <strong>{siteConsumptionStats.all_time_mean.toFixed(1)} L</strong>
+                    </div>
+                    <div>
+                      <span>Écart type absolu</span>
+                      <strong>{siteConsumptionStats.all_time_stddev.toFixed(1)} L</strong>
+                    </div>
+                  </div>
+                  <div className="chart-box secondary-box">
+                    <canvas id="chart-site-consumption" />
+                  </div>
+                </article>
+
+                <article className="metric-panel site-metric-card">
+                  <span className="metric-label">Volume carburant</span>
+                  <h3>Volume total / période</h3>
+                  <div className="site-metric-stack">
+                    <div>
+                      <span>Total période</span>
+                      <strong>{siteVolumeStats.total.toFixed(1)} L</strong>
+                      {renderDelta(siteVolumeStats)}
+                    </div>
+                    <div>
+                      <span>Moyenne</span>
+                      <strong>{siteVolumeStats.mean.toFixed(1)} L</strong>
+                      {renderMeanDelta(siteVolumeStats)}
+                    </div>
+                    <div>
+                      <span>Moy. absolue</span>
+                      <strong>{siteVolumeStats.all_time_mean.toFixed(1)} L</strong>
+                    </div>
+                    <div>
+                      <span>Écart type absolu</span>
+                      <strong>{siteVolumeStats.all_time_stddev.toFixed(1)} L</strong>
+                    </div>
+                  </div>
+                  <div className="chart-box secondary-box">
+                    <canvas id="chart-site-volume" />
+                  </div>
+                </article>
+              </div>
             </section>
           </>
         )}
@@ -700,6 +1094,7 @@ function App() {
     const pathMap = {
       presentation: '/',
       dashboard: '/dashboard/',
+      site: '/site/',
       groups: '/groupes/',
     }
 
@@ -713,6 +1108,11 @@ function App() {
       const pathname = window.location.pathname
       if (pathname.startsWith('/groupes')) {
         setView('groups')
+        return
+      }
+
+      if (pathname.startsWith('/site')) {
+        setView('site')
         return
       }
 
@@ -736,6 +1136,7 @@ function App() {
     <>
       {view === 'presentation' && <PresentationPage onNavigate={navigate} />}
       {view === 'dashboard' && <DashboardPage onNavigate={navigate} />}
+      {view === 'site' && <SitePage onNavigate={navigate} />}
       {view === 'groups' && <GroupsPage onNavigate={navigate} />}
     </>
   )

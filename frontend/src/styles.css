@@ -337,6 +337,24 @@ button {
   font-size: 1.1rem;
 }
 
+.summary-chip small,
+.group-stats small {
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.delta-up {
+  color: #dc3545;
+}
+
+.delta-down {
+  color: #198754;
+}
+
+.delta-neutral {
+  color: var(--muted);
+}
+
 .groups-list {
   display: grid;
   grid-template-columns: 1fr;
