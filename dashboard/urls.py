@@ -13,6 +13,7 @@ from dashboard.views import (
     consommation_component_view,
     groupes_dashboard_view,
     EtatCuvesAPIView,
+    CuvesDashboardAPIView,
     EvolutionVolumesAPIView,
     HorairesGroupesAPIView,
     ConsommationAPIView,
@@ -48,6 +49,7 @@ urlpatterns = [
     path('dashboard/horaires_groupes', HorairesGroupesAPIView.as_view(), name='api-dashboard-horaires-groupes'),
     path('dashboard/consommation', ConsommationAPIView.as_view(), name='api-dashboard-consommation'),
     path('dashboard/groupes', GroupesDashboardAPIView.as_view(), name='api-dashboard-groupes'),
+    path('dashboard/cuves', CuvesDashboardAPIView.as_view(), name='api-dashboard-cuves'),
 
     # Documentations Swagger UI & Schema OpenAPI
     path('schema/', SpectacularAPIView.as_view(), name='schema'),

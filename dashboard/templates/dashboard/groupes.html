@@ -89,14 +89,14 @@
 
     <div class="col-12 col-md-6 col-xl-3">
         <div class="card stat-card bg-body-tertiary border-0 h-100 p-3">
-            <div class="extra-small text-body-secondary fw-semibold mb-1">Horaires — Total période</div>
+            <div class="extra-small text-body-secondary fw-semibold mb-1">Écarts horaires — Total période</div>
             <h4 class="fw-bold mb-1 text-danger">{{ site_hours_stats.total|floatformat:1 }} h</h4>
             {% include 'dashboard/components/_variation_badge.html' with variation=site_hours_stats.variation_pct previous_total=site_hours_stats.previous_total unit='h' %}
         </div>
     </div>
     <div class="col-12 col-md-6 col-xl-3">
         <div class="card stat-card bg-body-tertiary border-0 h-100 p-3">
-            <div class="extra-small text-body-secondary fw-semibold mb-1">Horaires — Moyenne / période</div>
+            <div class="extra-small text-body-secondary fw-semibold mb-1">Écarts horaires — Moyenne / période</div>
             <h4 class="fw-bold mb-1 text-danger">{{ site_hours_stats.mean|floatformat:1 }} h</h4>
             <span class="extra-small text-body-secondary">Moy. par rapport dans la fenêtre</span>
         </div>
@@ -166,7 +166,7 @@
                 <!-- Stats horaires du groupe -->
                 <div class="row g-2 mb-3">
                     <div class="col-12">
-                        <span class="badge bg-danger-subtle text-danger extra-small fw-semibold">Horaires de fonctionnement</span>
+                        <span class="badge bg-danger-subtle text-danger extra-small fw-semibold">Variations horaires de fonctionnement</span>
                     </div>
                     <div class="col-6 col-md-3">
                         <div class="p-2 bg-body-tertiary rounded-3 text-center h-100">

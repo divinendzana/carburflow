@@ -1,10 +1,97 @@
 id_ligne,id_rapport,id_cuve_principale,id_cuve_journaliere,id_groupe,quantite_gasoil_cuve_principale,quantite_gasoil_cuve_journaliere,compteur_horaire,depotage,etat_fonctionnement,observations
-500,300,10,20,100,12000,850,1210.5,0,F,RAS - Remplissage normal
-501,300,10,21,100,12000,600,1210.5,0,F,RAS
-502,301,11,22,101,18000,1200,865.0,2000,F,Depotage de 2000L effectue le 09/07
-503,302,10,20,100,11000,800,1225.0,0,F,RAS
-504,302,11,22,101,16500,1100,880.0,0,F,Consommation régulière
-505,302,12,23,102,8500,500,445.0,0,F,RAS
-506,303,10,20,100,14000,900,1240.0,3000,F,Livraison gasoil 3000L
-507,303,11,22,101,15000,950,895.0,0,F,RAS
-508,303,12,23,102,7800,450,460.0,0,F,RAS
+9101,9001,1001,2001,3001,8448,1000,1864,0,F,RAS
+9102,9001,1002,2002,3002,2450,1000,989,0,F,RAS
+9103,9001,1003,2003,3003,2450,1000,7162,0,F,RAS
+9104,9001,1004,2004,3004,3045,392,1273,0,F,"La jauge de cette cuve est complètement dégradée, ce qui conduit à une lecture approximative des niveaux de carburant, il est impératif de la remplacer, pour une meilleure lecture des niveaux de carburant."
+9105,9001,1005,2005,3005,2161,1000,1163,0,F,RAS
+9106,9001,1005,2006,3006,2161,1000,8982,0,HS,RAS
+9107,9001,1006,2007,3007,2538,1000,6708,0,F,RAS
+9108,9001,1007,2008,3008,3126,1000,5334,0,F,RAS
+9109,9001,1008,2009,3009,630,192,4037,0,F,RAS
+9110,9001,1009,2010,3010,2250,,4038,0,F,RAS
+9111,9001,1010,2011,3011,1000,,1954,0,F,; Jauge sale ; Pupitre de lecture floue
+9112,9001,1011,2012,3012,320,,1644,0,P,EN ARRET
+9113,9001,1012,2013,3013,320,,1974,0,F,RAS
+9114,9001,1013,2014,3014,530,,19,0,F,RAS
+9115,9001,1014,2015,3015,650,,1164,0,P,Batterie HS ; Pas de chargeur batterie ;
+9116,9001,1015,2016,3016,750,,73,0,F,GES en défaut (en arrêt pour le moment
+9117,9001,1016,2017,3017,600,,1626,0,F,RAS
+9118,9001,1017,2018,3018,500,,896,0,F,RAS
+9119,9001,1018,2019,3019,710,,,0,P,Compteur horaire Illisible sur le contrôleur du GES
+9120,9001,1019,2020,3020,900,,663,0,F,"PAS D’INVERSSEUR de Sources, GES A L’ARRET"
+9121,9001,1020,2021,3021,970,,2139,0,P,RAS
+9122,9001,1021,2022,3022,730,1000,1706,0,F,RAS
+9123,9001,1022,2023,3023,2450,,5301,0,F,RAS
+9124,9001,1023,2024,3024,800,,801,0,F,GES En arrêt défaut de l’électrovanne d’arrêt
+9125,9001,1024,2025,3025,0,,,0,HS,GE lister Peter Vétuste en arrêt
+9126,9001,1025,2026,3026,0,,,0,HS,GE lister Peter Vétuste en arrêt
+9127,9001,1026,2027,3027,0,,,0,F,GES DEPLOYE A NEW BELL MAGASIN
+9128,9001,1027,2028,3028,800,,1231,0,F,RAS
+9129,9001,1028,2029,3029,600,,4211,0,P,RAS
+9130,9001,1029,2030,3030,154,,745,0,F,RAS
+9131,9001,1030,2031,3031,,,601,0,ND,RAS
+9132,9002,1001,2001,3001,7676,1000,1877,0,F,RAS
+9133,9002,1002,2002,3002,1757,1000,1003,0,F,RAS
+9134,9002,1003,2003,3003,1757,1000,7162,0,F,RAS
+9135,9002,1004,2004,3004,2860,588,1283,0,F,"La jauge de cette cuve est complètement dégradée, ce qui conduit à une lecture approximative des niveaux de carburant, il est impératif de la remplacer, pour une meilleure lecture des niveaux de carburant."
+9136,9002,1005,2005,3005,2161,1000,1185,0,F,Défaut d’inclinaison de la cuve Principale pour jauger
+9137,9002,1005,2006,3006,2161,1000,8982,0,HS,Défaut d’inclinaison de la cuve Principale pour jauger
+9138,9002,1006,2007,3007,2538,1000,6715,0,F,RAS
+9139,9002,1007,2008,3008,3084,1000,5336,0,F,RAS
+9140,9002,1008,2009,3009,580,192,4047,0,F,RAS
+9141,9002,1009,2010,3010,2250,,4038,0,F,RAS
+9142,9002,1010,2011,3011,1000,,1954,0,F,; Jauge sale ; Pupitre de lecture floue
+9143,9002,1011,2012,3012,320,,1644,0,P,EN ARRET
+9144,9002,1012,2013,3013,320,,1974,0,F,RAS
+9145,9002,1013,2014,3014,530,,19,0,F,RAS
+9146,9002,1014,2015,3015,650,,1164,0,P,Batterie HS ; Pas de chargeur batterie ;
+9147,9002,1015,2016,3016,750,,73,0,F,GES en défaut (en arrêt pour le moment
+9148,9002,1016,2017,3017,600,,1626,0,F,RAS
+9149,9002,1017,2018,3018,500,,896,0,F,RAS
+9150,9002,1018,2019,3019,710,,,0,P,Compteur horaire Illisible sur le contrôleur du GES
+9151,9002,1019,2020,3020,900,,663,0,F,"PAS D’INVERSSEUR de Sources, GES A L’ARRET"
+9152,9002,1020,2021,3021,970,,2139,0,P,RAS
+9153,9002,1021,2022,3022,730,1000,1706,0,F,RAS
+9154,9002,1022,2023,3023,2450,,5301,0,F,RAS
+9155,9002,1023,2024,3024,800,,801,0,F,GES En arrêt défaut de l’électrovanne d’arrêt
+9156,9002,1024,2025,3025,0,,,0,HS,GE lister Peter Vétuste en arrêt
+9157,9002,1025,2026,3026,0,,,0,HS,GE lister Peter Vétuste en arrêt
+9158,9002,1026,2027,3027,0,,,0,F,GES DEPLOYE A NEW BELL MAGASIN
+9159,9002,1027,2028,3028,800,,1231,0,F,RAS
+9160,9002,1028,2029,3029,600,,4211,0,P,RAS
+9161,9002,1029,2030,3030,154,,745,0,F,RAS
+9162,9002,1031,2032,3032,1250,,335,0,F,RAS
+9163,9002,1031,2033,3033,1250,,,0,HS,GES Hors service (défaut carte de contrôle)
+9164,9002,1030,2031,3031,,,601,0,ND,RAS
+9165,9003,1001,2001,3001,22462,1000,1877,15166,F,Ravitaillement de 15 166 Litres de carburant de la livraison de 25 OOO Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026
+9166,9003,1002,2002,3002,4520,1000,1014,3087,F,Ravitaillement de 3087 Litres de carburant de la livraison de 25 000 Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026
+9167,9003,1003,2003,3003,4520,1000,7162,3087,F,Ravitaillement de 3087 Litres de carburant de la livraison de 25 000 Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026
+9168,9003,1004,2004,3004,4032,588,1283,2232,F,Ravitaillement de 2232 Litres de carburant de la livraison de 25 OOO Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026 .
+9169,9003,1005,2005,3005,2161,1000,1185,0,F,Défaut d’inclinaison de la cuve Principale impossible de jauger dans ces conditions
+9170,9003,1005,2006,3006,2161,1000,8982,0,HS,Défaut d’inclinaison de la cuve Principale impossible de jauger dans ces conditions
+9171,9003,1006,2007,3007,4251,1000,6725,2314,F,Ravitaillement de 2314 Litres de carburant de la livraison de 25 OOO Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026
+9172,9003,1007,2008,3008,3084,1000,5336,0,F,RAS
+9173,9003,1008,2009,3009,530,192,4059,0,F,RAS
+9174,9003,1009,2010,3010,2250,,4038,0,F,RAS
+9175,9003,1010,2011,3011,1000,,1954,0,F,; Jauge sale ; Pupitre de lecture floue
+9176,9003,1011,2012,3012,320,,1644,0,P,EN ARRET
+9177,9003,1012,2013,3013,320,,1974,0,F,RAS
+9178,9003,1013,2014,3014,530,,19,0,F,RAS
+9179,9003,1014,2015,3015,650,,1164,0,P,Batterie HS ; Pas de chargeur batterie ;
+9180,9003,1015,2016,3016,750,,73,0,F,GES en défaut (en arrêt pour le moment
+9181,9003,1016,2017,3017,600,,1626,0,F,RAS
+9182,9003,1017,2018,3018,500,,896,0,F,RAS
+9183,9003,1018,2019,3019,710,,,0,P,Compteur horaire Illisible sur le contrôleur du GES
+9184,9003,1019,2020,3020,900,,663,0,F,"PAS D’INVERSSEUR de Sources, GES A L’ARRET"
+9185,9003,1020,2021,3021,970,,2139,0,P,RAS
+9186,9003,1021,2022,3022,730,1000,1706,0,F,RAS
+9187,9003,1022,2023,3023,2450,,5301,0,F,RAS
+9188,9003,1023,2024,3024,800,,801,0,F,GES En arrêt défaut de l’électrovanne d’arrêt
+9189,9003,1024,2025,3025,0,,,0,HS,GE lister Peter Vétuste en arrêt
+9190,9003,1025,2026,3026,0,,,0,HS,GE lister Peter Vétuste en arrêt
+9191,9003,1027,2028,3028,800,,1231,0,F,RAS
+9192,9003,1028,2029,3029,600,,4211,0,P,RAS
+9193,9003,1029,2030,3030,154,,745,0,F,RAS
+9194,9003,1031,2032,3032,3270,,357,3000,F,RAS Ravitaillement de 3000 Litres de carburant de la livraison de 25 OOO Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026
+9195,9003,1031,2033,3033,3270,,,0,HS,GES Hors service (défaut carte de contrôle)
+9196,9003,1030,2031,3031,,,601,0,ND,RAS

@@ -10,7 +10,7 @@ Component Template: Métrique #2 — Évolution des Volumes de Carburant (Global
             </div>
             <div>
                 <h5 class="mb-0 fw-bold">Métrique #2 — Évolution du Volume de Carburant</h5>
-                <p class="text-body-secondary small mb-0">Tendance chronologique des stocks cumulés et par site individuel.</p>
+                <p class="text-body-secondary small mb-0">Tendance chronologique des stocks cumulés et distribution des sites en Max / Médiane / Min.</p>
             </div>
         </div>
 
@@ -22,6 +22,41 @@ Component Template: Métrique #2 — Évolution des Volumes de Carburant (Global
     </div>
 
     <div class="card-body px-4 pb-4">
+        <div class="row g-3 mb-4">
+            <div class="col-12 col-md-4">
+                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
+                    <div class="icon-circle bg-primary bg-opacity-10 text-primary rounded-circle">
+                        <i class="bi bi-arrow-up-circle"></i>
+                    </div>
+                    <div>
+                        <div class="extra-small text-body-secondary fw-semibold">Max des sites</div>
+                        <h5 class="fw-bold mb-0">{{ volume_summary.max|floatformat:1 }} L</h5>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
+                    <div class="icon-circle bg-primary bg-opacity-10 text-primary rounded-circle">
+                        <i class="bi bi-graph-up"></i>
+                    </div>
+                    <div>
+                        <div class="extra-small text-body-secondary fw-semibold">Médiane des sites</div>
+                        <h5 class="fw-bold mb-0">{{ volume_summary.median|floatformat:1 }} L</h5>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
+                    <div class="icon-circle bg-primary bg-opacity-10 text-primary rounded-circle">
+                        <i class="bi bi-arrow-down-circle"></i>
+                    </div>
+                    <div>
+                        <div class="extra-small text-body-secondary fw-semibold">Min des sites</div>
+                        <h5 class="fw-bold mb-0">{{ volume_summary.min|floatformat:1 }} L</h5>
+                    </div>
+                </div>
+            </div>
+        </div>
         <div class="row g-4">
             
             <!-- Courbe 1 : Évolution du Volume Total Tous Sites -->
@@ -47,9 +82,9 @@ Component Template: Métrique #2 — Évolution des Volumes de Carburant (Global
                     <div class="d-flex align-items-center justify-content-between border-bottom pb-2 mb-3">
                         <div class="d-flex align-items-center gap-2">
                             <i class="bi bi-activity text-warning fs-5"></i>
-                            <h6 class="mb-0 fw-bold fs-6">Volume Individuel par Site</h6>
+                            <h6 class="mb-0 fw-bold fs-6">Distribution des Sites (Max / Médiane / Min)</h6>
                         </div>
-                        <span class="badge bg-warning-subtle text-warning rounded-pill">Par Site</span>
+                        <span class="badge bg-warning-subtle text-warning rounded-pill">Statistiques de répartition</span>
                     </div>
 
                     <div style="position: relative; height: 280px; width: 100%;">

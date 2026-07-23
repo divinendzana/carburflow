@@ -24,28 +24,40 @@ Component Template: Métrique #4 — Consommation Totale de Carburant
     </div>
 
     <div class="card-body px-4 pb-4">
-
-        <!-- Summary Stats Row -->
         <div class="row g-3 mb-4">
-            {% for item in consommation_sites_summary %}
-                <div class="col-12 col-md-4">
-                    <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3 {% if forloop.first %}border-warning{% endif %}">
-                        <div class="icon-circle {% if forloop.first %}bg-warning{% else %}bg-secondary{% endif %} text-white rounded-circle">
-                            <i class="bi bi-fuel-pump"></i>
-                        </div>
-                        <div>
-                            <div class="extra-small text-body-secondary fw-semibold">
-                                {{ item.site.nom_site }}
-                                {% if forloop.first %}
-                                    <span class="badge bg-warning-subtle text-warning ms-1 extra-small">Plus gros consommateur</span>
-                                {% endif %}
-                            </div>
-                            <h5 class="fw-bold mb-0">{{ item.total_consumption|floatformat:1 }} L</h5>
-                            <span class="extra-small text-body-secondary">Pic : {{ item.max_consumption|floatformat:1 }} L/période</span>
-                        </div>
+            <div class="col-12 col-md-4">
+                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
+                    <div class="icon-circle bg-warning bg-opacity-10 text-warning rounded-circle">
+                        <i class="bi bi-arrow-up-circle"></i>
+                    </div>
+                    <div>
+                        <div class="extra-small text-body-secondary fw-semibold">Max des sites</div>
+                        <h5 class="fw-bold mb-0">{{ consommation_summary.max|floatformat:1 }} L</h5>
                     </div>
                 </div>
-            {% endfor %}
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
+                    <div class="icon-circle bg-warning bg-opacity-10 text-warning rounded-circle">
+                        <i class="bi bi-graph-up"></i>
+                    </div>
+                    <div>
+                        <div class="extra-small text-body-secondary fw-semibold">Médiane des sites</div>
+                        <h5 class="fw-bold mb-0">{{ consommation_summary.median|floatformat:1 }} L</h5>
+                    </div>
+                </div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
+                    <div class="icon-circle bg-warning bg-opacity-10 text-warning rounded-circle">
+                        <i class="bi bi-arrow-down-circle"></i>
+                    </div>
+                    <div>
+                        <div class="extra-small text-body-secondary fw-semibold">Min des sites</div>
+                        <h5 class="fw-bold mb-0">{{ consommation_summary.min|floatformat:1 }} L</h5>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="row g-4">
@@ -72,10 +84,10 @@ Component Template: Métrique #4 — Consommation Totale de Carburant
                 <div class="card bg-body-tertiary border-0 rounded-4 p-3 h-100 shadow-sm">
                     <div class="d-flex align-items-center justify-content-between border-bottom pb-2 mb-3">
                         <div class="d-flex align-items-center gap-2">
-                            <i class="bi bi-activity text-info fs-5"></i>
+                            <i class="bi bi-activity text-warning fs-5"></i>
                             <h6 class="mb-0 fw-bold fs-6">Consommation Individuelle par Site</h6>
                         </div>
-                        <span class="badge bg-info-subtle text-info rounded-pill">Par Site</span>
+                        <span class="badge bg-warning-subtle text-warning rounded-pill">Par Site</span>
                     </div>
 
                     <div style="position: relative; height: 280px; width: 100%;">

@@ -14,6 +14,19 @@ from dashboard.models import (
 class Command(BaseCommand):
     help = "Importation des données CSV de CarburFlow dans la base de données SQLite."
 
+    def _to_float(self, value):
+        if value is None:
+            return 0.0
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value).strip()
+        if text in {'', 'nan', 'None', 'null'}:
+            return 0.0
+        try:
+            return float(text)
+        except ValueError:
+            return 0.0
+
     def add_arguments(self, parser):
         parser.add_argument(
             '--dir',
@@ -57,7 +70,7 @@ class Command(BaseCommand):
                         id=cp_id,
                         defaults={
                             'site_id': site_id,
-                            'capacite': float(row.get('capacite', 0.0)),
+                            'capacite': self._to_float(row.get('capacite', 0.0)),
                         },
                     )
             self.stdout.write(self.style.SUCCESS("✔ Fichier cuve_principale.csv importé"))
@@ -74,7 +87,7 @@ class Command(BaseCommand):
                         id=cj_id,
                         defaults={
                             'cuve_principale_id': cp_id,
-                            'capacite': float(row.get('capacite', 0.0)),
+                            'capacite': self._to_float(row.get('capacite', 0.0)),
                         },
                     )
             self.stdout.write(self.style.SUCCESS("✔ Fichier cuve_journaliere.csv importé"))
@@ -89,8 +102,8 @@ class Command(BaseCommand):
                     GroupeElectrogene.objects.update_or_create(
                         id=g_id,
                         defaults={
-                            'compteur_horaire': float(row.get('compteur_horaire', 0.0)),
-                            'consommation_horaire': float(row.get('consommation_horaire', 0.0)),
+                            'compteur_horaire': self._to_float(row.get('compteur_horaire', 0.0)),
+                            'consommation_horaire': self._to_float(row.get('consommation_horaire', 0.0)),
                             'marque': row.get('marque', ''),
                             'puissance': row.get('puissance', ''),
                         },
@@ -148,10 +161,10 @@ class Command(BaseCommand):
                             'cuve_principale_id': cp_id,
                             'cuve_journaliere_id': cj_id,
                             'groupe_id': g_id,
-                            'quantite_gasoil_cuve_principale': float(row.get('quantite_gasoil_cuve_principale', 0.0)),
-                            'quantite_gasoil_cuve_journaliere': float(row.get('quantite_gasoil_cuve_journaliere', 0.0)),
-                            'compteur_horaire': float(row.get('compteur_horaire', 0.0)),
-                            'depotage': float(row.get('depotage', 0.0)),
+                            'quantite_gasoil_cuve_principale': self._to_float(row.get('quantite_gasoil_cuve_principale', 0.0)),
+                            'quantite_gasoil_cuve_journaliere': self._to_float(row.get('quantite_gasoil_cuve_journaliere', 0.0)),
+                            'compteur_horaire': self._to_float(row.get('compteur_horaire', 0.0)),
+                            'depotage': self._to_float(row.get('depotage', 0.0)),
                             'etat_fonctionnement': row.get('etat_fonctionnement', 'F'),
                             'observations': row.get('observations', ''),
                         },

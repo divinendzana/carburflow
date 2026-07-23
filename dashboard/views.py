@@ -1,4 +1,5 @@
 import json
+import statistics
 from django.shortcuts import render
 from django.db.models import Sum
 from rest_framework import viewsets
@@ -188,7 +189,7 @@ def get_etat_cuves_context(selected_site_id=None):
 
 def get_evolution_volumes_context():
     """Calcul des données de métrique #2 : Courbe d'évolution du volume total."""
-    reports = Rapport.objects.order_by('date_debut', 'id')
+    reports = list(Rapport.objects.order_by('date_debut', 'id'))
     labels = [
         f"{r.date_debut.strftime('%d/%m')} au {r.date_fin.strftime('%d/%m')}"
         for r in reports
@@ -211,6 +212,22 @@ def get_evolution_volumes_context():
             site_volumes[s.id].append(tot)
             r_total += tot
         global_volumes.append(r_total)
+
+    per_report_distrib = []
+    for idx in range(len(reports)):
+        report_values = [site_volumes[s.id][idx] for s in sites]
+        per_report_distrib.append({
+            'max': max(report_values) if report_values else 0.0,
+            'median': statistics.median(report_values) if report_values else 0.0,
+            'min': min(report_values) if report_values else 0.0,
+        })
+
+    latest_site_values = [site_volumes[s.id][-1] if site_volumes[s.id] else 0.0 for s in sites]
+    latest_summary = {
+        'max': round(max(latest_site_values), 1) if latest_site_values else 0.0,
+        'median': round(statistics.median(latest_site_values), 1) if latest_site_values else 0.0,
+        'min': round(min(latest_site_values), 1) if latest_site_values else 0.0,
+    }
 
     sites_series = []
     for idx, s in enumerate(sites):
@@ -245,14 +262,15 @@ def get_evolution_volumes_context():
             }
             for item in sites_series_sorted
         ]),
+        'volume_summary': latest_summary,
     }
 
 
 def get_horaires_groupes_context():
     """Calcul de la métrique #3 : Horaires de fonctionnement des groupes électrogènes.
-    - Courbe globale : somme des compteurs horaires de tous les groupes par rapport.
-    - Courbes par site filtrable : évolution du compteur horaire de chaque groupe du site.
-    - Par défaut : le site ayant le plus gros cumul d'horaire.
+    - Courbe globale : somme des écarts d'horamètres entre deux rapports par groupe.
+    - Courbes par site filtrable : évolution des écarts horaires de chaque groupe du site.
+    - Par défaut : le site ayant le plus gros cumul de variation d'horaire.
     """
     reports = list(Rapport.objects.order_by('date_debut', 'id'))
     labels = [
@@ -264,7 +282,6 @@ def get_horaires_groupes_context():
         'cuves_principales__cuves_journalieres__groupes_electrogenes'
     ).all())
 
-    # Build mapping: site -> list of GroupeElectrogene objects
     site_groupes = {}
     groupe_to_site = {}
     for site in sites:
@@ -277,42 +294,47 @@ def get_horaires_groupes_context():
         site_groupes[site.id] = sorted(groupes_set, key=lambda g: g.id)
 
     groupe_colors = ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#6f42c1', '#0dcaf0', '#fd7e14']
+    all_groupe_ids = set(groupe_to_site.keys())
 
-    # Per-report data: global total hours & per-groupe hours
-    global_hours = []
-    groupe_hours = {}  # groupe_id -> [hours per report]
-    all_groupe_ids = set()
-    for g_id in groupe_to_site:
-        all_groupe_ids.add(g_id)
-        groupe_hours[g_id] = []
+    groupe_compteurs = {g_id: [] for g_id in all_groupe_ids}
+    last_known = {g_id: 0.0 for g_id in all_groupe_ids}
 
     for r in reports:
         lignes = LigneRapport.objects.filter(rapport=r)
-        # Get max compteur_horaire per groupe in this report
-        report_groupe_hours = {}
+        report_compteurs = {}
         for l in lignes:
             if l.groupe_id:
-                existing = report_groupe_hours.get(l.groupe_id, 0.0)
-                report_groupe_hours[l.groupe_id] = max(existing, l.compteur_horaire)
-
-        r_total = sum(report_groupe_hours.values())
-        global_hours.append(r_total)
+                existing = report_compteurs.get(l.groupe_id, 0.0)
+                report_compteurs[l.groupe_id] = max(existing, l.compteur_horaire)
 
         for g_id in all_groupe_ids:
-            groupe_hours[g_id].append(report_groupe_hours.get(g_id, 0.0))
+            if g_id in report_compteurs and report_compteurs[g_id] > 0:
+                last_known[g_id] = report_compteurs[g_id]
+            groupe_compteurs[g_id].append(last_known[g_id])
 
-    # Build per-site chart datasets
+    groupe_hours = {g_id: [0.0] * len(reports) for g_id in all_groupe_ids}
+    global_hours = [0.0] * len(reports)
+    site_max_hours = {site.id: 0.0 for site in sites}
+
+    for g_id in all_groupe_ids:
+        compteurs = groupe_compteurs[g_id]
+        site_id = groupe_to_site.get(g_id)
+        for i in range(1, len(compteurs)):
+            prev_val = compteurs[i - 1]
+            delta_h = max(0.0, compteurs[i] - prev_val)
+            delta_h = round(delta_h, 1)
+            groupe_hours[g_id][i] = delta_h
+            global_hours[i] += delta_h
+            if site_id:
+                site_max_hours[site.id] += delta_h
+
     sites_horaires_data = {}
-    site_max_hours = {}
     for site in sites:
         groupes = site_groupes.get(site.id, [])
         datasets = []
-        site_total = 0.0
         for idx, g in enumerate(groupes):
-            g_data = groupe_hours.get(g.id, [])
+            g_data = [round(v, 1) for v in groupe_hours.get(g.id, [0.0] * len(reports))]
             color = groupe_colors[idx % len(groupe_colors)]
-            last_val = g_data[-1] if g_data else 0.0
-            site_total += last_val
             datasets.append({
                 'label': f'G#{g.id} ({g.marque} {g.puissance})',
                 'data': g_data,
@@ -328,17 +350,13 @@ def get_horaires_groupes_context():
             'nom_site': site.nom_site,
             'datasets': datasets,
         }
-        site_max_hours[site.id] = site_total
 
-    # Default site = the one with the highest total hours
     default_site_id = max(site_max_hours, key=site_max_hours.get) if site_max_hours else (sites[0].id if sites else 1)
-
-    # Latest report total hours
     latest_total = global_hours[-1] if global_hours else 0.0
 
     return {
         'horaires_labels_json': json.dumps(labels),
-        'horaires_global_json': json.dumps(global_hours),
+        'horaires_global_json': json.dumps([round(v, 1) for v in global_hours]),
         'horaires_sites_data_json': json.dumps(sites_horaires_data),
         'horaires_default_site_id': default_site_id,
         'horaires_latest_total': latest_total,
@@ -356,7 +374,7 @@ def get_horaires_groupes_context():
 def get_consommation_context():
     """Calcul de la métrique #4 : Consommation totale de carburant.
     - Courbe globale : somme des consommations de tous les groupes par période de rapport.
-    - Courbes par site : la courbe la plus haute correspond au site qui consomme le plus.
+    - Courbes par site : agrégation des séries de sites sous forme Max / Médiane / Min.
     Consommation = delta compteur horaire × consommation horaire (L/h) du groupe.
     """
     reports = list(Rapport.objects.order_by('date_debut', 'id'))
@@ -380,7 +398,6 @@ def get_consommation_context():
                     groupe_to_site[g.id] = site.id
                     groupe_rates[g.id] = g.consommation_horaire
 
-    # Compteur horaire par groupe et par rapport (forward-fill si absent)
     groupe_compteurs = {g_id: [] for g_id in all_groupe_ids}
     last_known = {g_id: 0.0 for g_id in all_groupe_ids}
 
@@ -397,7 +414,6 @@ def get_consommation_context():
                 last_known[g_id] = report_compteurs[g_id]
             groupe_compteurs[g_id].append(last_known[g_id])
 
-    # Consommation par groupe puis agrégation par site
     site_consumption = {s.id: [0.0] * len(reports) for s in sites}
     global_consumption = [0.0] * len(reports)
 
@@ -414,6 +430,22 @@ def get_consommation_context():
             global_consumption[i] += consumed
             if site_id:
                 site_consumption[site_id][i] += consumed
+
+    per_report_distrib = []
+    for idx in range(len(reports)):
+        report_values = [site_consumption[s.id][idx] for s in sites]
+        per_report_distrib.append({
+            'max': max(report_values) if report_values else 0.0,
+            'median': statistics.median(report_values) if report_values else 0.0,
+            'min': min(report_values) if report_values else 0.0,
+        })
+
+    latest_site_values = [site_consumption[s.id][-1] if site_consumption[s.id] else 0.0 for s in sites]
+    latest_summary = {
+        'max': round(max(latest_site_values), 1) if latest_site_values else 0.0,
+        'median': round(statistics.median(latest_site_values), 1) if latest_site_values else 0.0,
+        'min': round(min(latest_site_values), 1) if latest_site_values else 0.0,
+    }
 
     site_colors = ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#6f42c1']
     sites_series = []
@@ -452,14 +484,7 @@ def get_consommation_context():
             for item in sites_series_sorted
         ]),
         'consommation_latest_total': latest_total,
-        'consommation_sites_summary': [
-            {
-                'site': site_by_id[item['id']],
-                'total_consumption': item['total_consumption'],
-                'max_consumption': item['max_consumption'],
-            }
-            for item in sites_series_sorted
-        ],
+        'consommation_summary': latest_summary,
     }
 
 
@@ -616,6 +641,14 @@ class GroupesDashboardAPIView(APIView):
             'selected_rapport_fin': ctx['selected_rapport_fin'],
             'selected_site_id': ctx['selected_site_id'],
             'previous_period_label': ctx['previous_period_label'],
+            'rapport_choices': ctx['rapport_choices'],
+            'sites': [
+                {
+                    'id': site.id,
+                    'nom_site': site.nom_site,
+                }
+                for site in ctx['sites']
+            ],
             'site_hours': ctx['site_hours_stats'],
             'site_consumption': ctx['site_consumption_stats'],
             'labels': json.loads(ctx['chart_labels_json']),
@@ -623,12 +656,75 @@ class GroupesDashboardAPIView(APIView):
                 {
                     'id': b['id'],
                     'label': b['label'],
+                    'marque': b['marque'],
+                    'puissance': b['puissance'],
+                    'rate': b['rate'],
+                    'color': b['color'],
                     'hours': b['hours_stats'],
                     'consumption': json.loads(b['consumption_json']),
+                    'consumption_stats': b['consumption_stats'],
                     'compteurs': json.loads(b['compteurs_json']),
                     'hours_run': json.loads(b['hours_run_json']),
                 }
                 for b in ctx['group_blocks']
+            ],
+        })
+
+
+class CuvesDashboardAPIView(APIView):
+    """Endpoint API analytique pour la page Cuves."""
+
+    @extend_schema(
+        summary="Dashboard Cuves (Analytique)",
+        description="Métriques de volume sur période pour les cuves principales et journalières.",
+        responses={200: dict}
+    )
+    def get(self, request):
+        from dashboard.analytics import get_cuves_page_context
+
+        ctx = get_cuves_page_context(
+            rapport_debut_id=request.query_params.get('rapport_debut'),
+            rapport_fin_id=request.query_params.get('rapport_fin'),
+            site_id=request.query_params.get('site_id'),
+        )
+        return Response({
+            'period_label': ctx['period_label'],
+            'selected_rapport_debut': ctx['selected_rapport_debut'],
+            'selected_rapport_fin': ctx['selected_rapport_fin'],
+            'selected_site_id': ctx['selected_site_id'],
+            'previous_period_label': ctx['previous_period_label'],
+            'rapport_choices': ctx['rapport_choices'],
+            'sites': [
+                {
+                    'id': site.id,
+                    'nom_site': site.nom_site,
+                }
+                for site in ctx['sites']
+            ],
+            'site_principal_stats': ctx['site_principal_stats'],
+            'site_journalier_stats': ctx['site_journalier_stats'],
+            'labels': json.loads(ctx['chart_labels_json']),
+            'principal_blocks': [
+                {
+                    'id': block['id'],
+                    'label': block['label'],
+                    'capacity': block['capacity'],
+                    'color': block['color'],
+                    'stats': block['stats'],
+                    'values': json.loads(block['values_json']),
+                }
+                for block in ctx['principal_blocks']
+            ],
+            'journalier_blocks': [
+                {
+                    'id': block['id'],
+                    'label': block['label'],
+                    'capacity': block['capacity'],
+                    'color': block['color'],
+                    'stats': block['stats'],
+                    'values': json.loads(block['values_json']),
+                }
+                for block in ctx['journalier_blocks']
             ],
         })
 

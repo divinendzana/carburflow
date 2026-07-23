@@ -30,45 +30,6 @@ Component Template: Métrique #1 — Niveaux des Cuves Principales & Journalièr
 
     <div class="card-body px-4 pb-4">
         
-        <!-- Summary Stats Row -->
-        <div class="row g-3 mb-4">
-            <div class="col-12 col-md-4">
-                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
-                    <div class="icon-circle bg-primary text-white rounded-circle">
-                        <i class="bi bi-droplet-half"></i>
-                    </div>
-                    <div>
-                        <div class="extra-small text-body-secondary fw-semibold">Volume Total Stocké</div>
-                        <h5 class="fw-bold mb-0">{{ total_volume_global|floatformat:1 }} L</h5>
-                    </div>
-                </div>
-            </div>
-            <div class="col-12 col-md-4">
-                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
-                    <div class="icon-circle bg-secondary text-white rounded-circle">
-                        <i class="bi bi-box-seam"></i>
-                    </div>
-                    <div>
-                        <div class="extra-small text-body-secondary fw-semibold">Capacité Totale Cuves</div>
-                        <h5 class="fw-bold mb-0">{{ total_capacity_global|floatformat:1 }} L</h5>
-                    </div>
-                </div>
-            </div>
-            <div class="col-12 col-md-4">
-                <div class="p-3 bg-body-tertiary rounded-3 border d-flex align-items-center gap-3">
-                    <div class="icon-circle {% if global_pct >= 50 %}bg-success{% elif global_pct >= 20 %}bg-warning{% else %}bg-danger{% endif %} text-white rounded-circle">
-                        <i class="bi bi-speedometer"></i>
-                    </div>
-                    <div>
-                        <div class="extra-small text-body-secondary fw-semibold">Statut Général</div>
-                        <h5 class="fw-bold mb-0">
-                            {% if global_pct >= 50 %}Optimal{% elif global_pct >= 20 %}Vigilance{% else %}Critique{% endif %}
-                        </h5>
-                    </div>
-                </div>
-            </div>
-        </div>
-
         <div class="row g-4">
             
             <!-- Graphique 1 (Gauche) : Niveau des Cuves Principales (%) -->

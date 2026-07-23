@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from dashboard.models import Site, Rapport, LigneRapport
+from dashboard.models import Site, Rapport, LigneRapport, CuvePrincipale, CuveJournaliere
 
 
 GROUPE_COLORS = ['#0d6efd', '#198754', '#ffc107', '#dc3545', '#6f42c1', '#0dcaf0', '#fd7e14']
@@ -17,6 +17,14 @@ def _variation_pct(current: float, previous: float) -> float | None:
     return round(((current - previous) / previous) * 100, 1)
 
 
+def _stddev(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    mean = sum(values) / len(values)
+    variance = sum((v - mean) ** 2 for v in values) / len(values)
+    return round(variance ** 0.5, 1)
+
+
 def _empty_window_stats() -> dict:
     return {
         'total': 0.0,
@@ -24,7 +32,9 @@ def _empty_window_stats() -> dict:
         'previous_total': None,
         'previous_mean': None,
         'variation_pct': None,
+        'mean_variation_pct': None,
         'all_time_mean': 0.0,
+        'all_time_stddev': 0.0,
         'has_previous_period': False,
     }
 
@@ -50,6 +60,7 @@ def _period_stats(values: list[float], start_idx: int, end_idx: int) -> dict:
 
     meaningful = [v for v in values[1:] if v > 0] or values
     all_time_mean = sum(meaningful) / len(meaningful) if meaningful else 0.0
+    all_time_stddev = _stddev(meaningful)
 
     prev_indices = _previous_window_indices(start_idx, end_idx)
     if prev_indices is None:
@@ -59,7 +70,9 @@ def _period_stats(values: list[float], start_idx: int, end_idx: int) -> dict:
             'previous_total': None,
             'previous_mean': None,
             'variation_pct': None,
+            'mean_variation_pct': None,
             'all_time_mean': round(all_time_mean, 1),
+            'all_time_stddev': all_time_stddev,
             'has_previous_period': False,
         }
 
@@ -74,7 +87,9 @@ def _period_stats(values: list[float], start_idx: int, end_idx: int) -> dict:
         'previous_total': round(prev_total, 1),
         'previous_mean': round(prev_mean, 1),
         'variation_pct': _variation_pct(total, prev_total),
+        'mean_variation_pct': _variation_pct(mean, prev_mean),
         'all_time_mean': round(all_time_mean, 1),
+        'all_time_stddev': all_time_stddev,
         'has_previous_period': True,
     }
 
@@ -301,5 +316,110 @@ def get_groupes_page_context(rapport_debut_id=None, rapport_fin_id=None, site_id
         'site_hours_stats': site_hours_stats,
         'site_consumption_stats': site_consumption_stats,
         'group_blocks': group_blocks,
+        'chart_labels_json': json.dumps(window_labels),
+    }
+
+
+def get_cuves_page_context(rapport_debut_id=None, rapport_fin_id=None, site_id=None) -> dict:
+    """Contexte complet pour la page Cuves avec filtres période et site."""
+    reports = list(Rapport.objects.order_by('date_debut', 'id'))
+    labels = [
+        f"{r.date_debut.strftime('%d/%m')} au {r.date_fin.strftime('%d/%m')}"
+        for r in reports
+    ]
+    report_ids = [r.id for r in reports]
+    sites = list(Site.objects.prefetch_related('cuves_principales__cuves_journalieres').all())
+
+    start_idx, end_idx = resolve_period_indices(report_ids, rapport_debut_id, rapport_fin_id)
+    window_labels = labels[start_idx:end_idx + 1]
+
+    if site_id is not None:
+        try:
+            site_id = int(site_id)
+        except (ValueError, TypeError):
+            site_id = sites[0].id if sites else None
+    if not site_id and sites:
+        site_id = sites[0].id
+
+    site_by_id = {s.id: s for s in sites}
+    selected_site = site_by_id.get(site_id)
+
+    report_series = []
+    for report in reports:
+        lignes = list(LigneRapport.objects.filter(rapport=report).select_related('cuve_principale', 'cuve_journaliere'))
+        principal_map = {
+            ligne.cuve_principale_id: ligne.quantite_gasoil_cuve_principale
+            for ligne in lignes
+            if ligne.cuve_principale_id is not None
+        }
+        journaliere_map = {
+            ligne.cuve_journaliere_id: ligne.quantite_gasoil_cuve_journaliere
+            for ligne in lignes
+            if ligne.cuve_journaliere_id is not None
+        }
+        report_series.append((principal_map, journaliere_map))
+
+    principal_blocks = []
+    journalier_blocks = []
+
+    if selected_site:
+        principal_tanks = list(selected_site.cuves_principales.all())
+        journalier_tanks = [cj for cp in principal_tanks for cj in cp.cuves_journalieres.all()]
+
+        for index, cp in enumerate(principal_tanks):
+            values = [
+                report_series[i][0].get(cp.id, 0.0)
+                for i in range(len(report_series))
+            ]
+            principal_blocks.append({
+                'id': cp.id,
+                'label': f"CP #{cp.id} ({selected_site.nom_site})",
+                'capacity': cp.capacite,
+                'color': GROUPE_COLORS[index % len(GROUPE_COLORS)],
+                'stats': _period_stats(values, start_idx, end_idx),
+                'values_json': json.dumps([round(v, 1) for v in values[start_idx:end_idx + 1]]),
+            })
+
+        for index, cj in enumerate(journalier_tanks):
+            values = [
+                report_series[i][1].get(cj.id, 0.0)
+                for i in range(len(report_series))
+            ]
+            journalier_blocks.append({
+                'id': cj.id,
+                'label': f"CJ #{cj.id} ({selected_site.nom_site})",
+                'capacity': cj.capacite,
+                'color': GROUPE_COLORS[index % len(GROUPE_COLORS)],
+                'stats': _period_stats(values, start_idx, end_idx),
+                'values_json': json.dumps([round(v, 1) for v in values[start_idx:end_idx + 1]]),
+            })
+
+    site_principal_values = []
+    site_journalier_values = []
+    if selected_site:
+        for principal_map, journaliere_map in report_series:
+            site_principal_values.append(sum(principal_map.get(cp.id, 0.0) for cp in selected_site.cuves_principales.all()))
+            site_journalier_values.append(sum(journaliere_map.get(cj.id, 0.0) for cp in selected_site.cuves_principales.all() for cj in cp.cuves_journalieres.all()))
+
+    rapport_choices = [
+        {'id': r.id, 'label': labels[i]}
+        for i, r in enumerate(reports)
+    ]
+
+    previous_period_label = _previous_period_label(labels, start_idx, end_idx)
+
+    return {
+        'rapport_choices': rapport_choices,
+        'selected_rapport_debut': report_ids[start_idx],
+        'selected_rapport_fin': report_ids[end_idx],
+        'selected_site_id': site_id,
+        'selected_site': selected_site,
+        'sites': sites,
+        'period_label': f"{window_labels[0]} → {window_labels[-1]}" if window_labels else '—',
+        'previous_period_label': previous_period_label,
+        'site_principal_stats': _period_stats(site_principal_values, start_idx, end_idx),
+        'site_journalier_stats': _period_stats(site_journalier_values, start_idx, end_idx),
+        'principal_blocks': principal_blocks,
+        'journalier_blocks': journalier_blocks,
         'chart_labels_json': json.dumps(window_labels),
     }
