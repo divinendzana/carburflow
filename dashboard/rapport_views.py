@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 
-from dashboard.models import Rapport, RapportSoumission
+from dashboard.models import Rapport
 from dashboard.norme import (
     NORME_COLUMNS,
     NORME_META,
@@ -16,7 +16,7 @@ from dashboard.norme import (
     rows_from_xlsx,
 )
 from dashboard.permissions import user_is_admin
-from dashboard.serializers import RapportSerializer, RapportSoumissionSerializer
+from dashboard.serializers import RapportSerializer
 
 
 class NormeMetaAPIView(APIView):
@@ -75,10 +75,8 @@ class RapportUploadAPIView(APIView):
         try:
             if lower.endswith('.xlsx'):
                 rows = rows_from_xlsx(raw)
-                fmt = 'xlsx'
             elif lower.endswith('.csv'):
                 rows = rows_from_csv(raw)
-                fmt = 'csv'
             else:
                 return Response(
                     {'detail': 'Format non supporté. Utilisez .xlsx ou .csv.'},
@@ -86,50 +84,18 @@ class RapportUploadAPIView(APIView):
                 )
 
             rapport, imported = import_report_rows(rows, request.user)
-            soumission = RapportSoumission.objects.create(
-                user=request.user,
-                filename=filename,
-                format=fmt,
-                status=RapportSoumission.STATUS_SUCCESS,
-                rows_imported=imported,
-                message=f'{imported} ligne(s) importée(s).',
-                rapport=rapport,
-            )
             return Response(
                 {
-                    'detail': soumission.message,
-                    'soumission': RapportSoumissionSerializer(soumission).data,
+                    'detail': f'{imported} ligne(s) importée(s).',
                     'rapport': RapportSerializer(rapport).data,
                 },
                 status=status.HTTP_201_CREATED,
             )
         except Exception as exc:
-            soumission = RapportSoumission.objects.create(
-                user=request.user,
-                filename=filename,
-                format='xlsx' if lower.endswith('.xlsx') else 'csv',
-                status=RapportSoumission.STATUS_ERROR,
-                rows_imported=0,
-                message=str(exc),
-            )
             return Response(
-                {
-                    'detail': str(exc),
-                    'soumission': RapportSoumissionSerializer(soumission).data,
-                },
+                {'detail': str(exc)},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-
-
-class RapportSoumissionListAPIView(APIView):
-    permission_classes = [IsAuthenticated]
-
-    @extend_schema(tags=['Rapports'], summary='Historique des envois')
-    def get(self, request):
-        qs = RapportSoumission.objects.select_related('user', 'rapport').all()
-        if not user_is_admin(request.user):
-            qs = qs.filter(user=request.user)
-        return Response(RapportSoumissionSerializer(qs[:100], many=True).data)
 
 
 class MesRapportsAPIView(APIView):
@@ -138,6 +104,4 @@ class MesRapportsAPIView(APIView):
     @extend_schema(tags=['Rapports'], summary='Rapports visibles selon le rôle')
     def get(self, request):
         qs = Rapport.objects.all().order_by('-date_fin', '-id')
-        if not user_is_admin(request.user):
-            qs = qs.filter(created_by=request.user)
         return Response(RapportSerializer(qs[:50], many=True).data)

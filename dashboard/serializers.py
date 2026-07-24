@@ -1,19 +1,11 @@
 from rest_framework import serializers
 from dashboard.models import (
-    Site,
     CuvePrincipale,
     CuveJournaliere,
     GroupeElectrogene,
     Rapport,
     LigneRapport,
-    RapportSoumission,
 )
-
-
-class SiteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Site
-        fields = ['id', 'nom_site', 'localisation']
 
 
 class CuvePrincipaleSerializer(serializers.ModelSerializer):
@@ -41,15 +33,9 @@ class GroupeElectrogeneSerializer(serializers.ModelSerializer):
 
 
 class RapportSerializer(serializers.ModelSerializer):
-    created_by_username = serializers.SerializerMethodField()
-
     class Meta:
         model = Rapport
-        fields = ['id', 'date_debut', 'date_fin', 'created_by', 'created_by_username', 'created_at']
-        read_only_fields = ['created_by', 'created_at']
-
-    def get_created_by_username(self, obj):
-        return obj.created_by.username if obj.created_by_id else None
+        fields = ['id', 'date_debut', 'date_fin']
 
 
 class LigneRapportSerializer(serializers.ModelSerializer):
@@ -68,32 +54,3 @@ class LigneRapportSerializer(serializers.ModelSerializer):
             'etat_fonctionnement',
             'observations',
         ]
-
-
-class RapportSoumissionSerializer(serializers.ModelSerializer):
-    username = serializers.SerializerMethodField()
-    rapport_label = serializers.SerializerMethodField()
-
-    class Meta:
-        model = RapportSoumission
-        fields = [
-            'id',
-            'filename',
-            'format',
-            'status',
-            'rows_imported',
-            'message',
-            'rapport',
-            'rapport_label',
-            'username',
-            'created_at',
-        ]
-
-    def get_username(self, obj):
-        return obj.user.username if obj.user_id else None
-
-    def get_rapport_label(self, obj):
-        if not obj.rapport_id:
-            return None
-        r = obj.rapport
-        return f'#{r.id} ({r.date_debut} → {r.date_fin})'

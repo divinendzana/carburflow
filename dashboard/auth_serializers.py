@@ -4,15 +4,13 @@ from django.contrib.auth.password_validation import validate_password
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 
-from dashboard.models import Site, UserProfile
+from dashboard.models import UserProfile
 from dashboard.permissions import get_user_role
 
 
 class UserSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
     full_name = serializers.SerializerMethodField()
-    site_id = serializers.SerializerMethodField()
-    site_name = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -25,8 +23,6 @@ class UserSerializer(serializers.ModelSerializer):
             'full_name',
             'role',
             'is_staff',
-            'site_id',
-            'site_name',
         ]
 
     def get_role(self, obj):
@@ -36,22 +32,6 @@ class UserSerializer(serializers.ModelSerializer):
         name = obj.get_full_name().strip()
         return name or obj.username
 
-    def get_site_id(self, obj):
-        profile = getattr(obj, 'profile', None)
-        return profile.site_id if profile else None
-
-    def get_site_name(self, obj):
-        profile = getattr(obj, 'profile', None)
-        if profile and profile.site_id:
-            return profile.site.nom_site
-        return None
-
-
-class PublicSiteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Site
-        fields = ['id', 'nom_site', 'localisation']
-
 
 class RegisterSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
@@ -60,20 +40,12 @@ class RegisterSerializer(serializers.Serializer):
     password_confirm = serializers.CharField(write_only=True, min_length=6)
     first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
     last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
-    site_id = serializers.IntegerField(required=False, allow_null=True)
 
     def validate_username(self, value):
         username = value.strip()
         if User.objects.filter(username__iexact=username).exists():
-            raise serializers.ValidationError('Ce nom d’utilisateur est déjà pris.')
+            raise serializers.ValidationError('Ce nom d\u2019utilisateur est déjà pris.')
         return username
-
-    def validate_site_id(self, value):
-        if value is None:
-            return value
-        if not Site.objects.filter(pk=value).exists():
-            raise serializers.ValidationError('Site introuvable.')
-        return value
 
     def validate(self, attrs):
         if attrs['password'] != attrs['password_confirm']:
@@ -81,7 +53,6 @@ class RegisterSerializer(serializers.Serializer):
         try:
             validate_password(attrs['password'])
         except Exception:
-            # Accepte des mots de passe courts en démo (ex. user123) si la longueur min est OK
             if len(attrs['password']) < 6:
                 raise serializers.ValidationError({'password': 'Mot de passe trop court (min. 6).'})
         return attrs
@@ -89,7 +60,6 @@ class RegisterSerializer(serializers.Serializer):
     def create(self, validated_data):
         validated_data.pop('password_confirm')
         password = validated_data.pop('password')
-        site_id = validated_data.pop('site_id', None)
         user = User(
             username=validated_data['username'],
             email=validated_data.get('email', ''),
@@ -98,8 +68,7 @@ class RegisterSerializer(serializers.Serializer):
         )
         user.set_password(password)
         user.save()
-        site = Site.objects.filter(pk=site_id).first() if site_id else None
-        UserProfile.objects.create(user=user, role=UserProfile.ROLE_USER, site=site)
+        UserProfile.objects.create(user=user, role=UserProfile.ROLE_USER)
         Token.objects.get_or_create(user=user)
         return user
 

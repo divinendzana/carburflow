@@ -9,7 +9,6 @@ from dashboard.models import (
     GroupeElectrogene,
     Rapport,
     LigneRapport,
-    Site,
 )
 
 
@@ -45,16 +44,15 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.WARNING('Suppression des données existantes...'))
 
-        # Nettoyage par ordre de dépendances pour éviter les contraintes liées.
+        # Ordre de suppression respectant les contraintes de clés étrangères
         LigneRapport.objects.all().delete()
         Rapport.objects.all().delete()
-        GroupeElectrogene.objects.all().delete()
         CuveJournaliere.objects.all().delete()
+        GroupeElectrogene.objects.all().delete()
         CuvePrincipale.objects.all().delete()
-        Site.objects.all().delete()
 
         self.stdout.write(self.style.SUCCESS('✔ Données supprimées'))
 
         self.stdout.write(self.style.NOTICE(f'Importation depuis : {data_dir}'))
         call_command('import', dir=str(data_dir), stdout=self.stdout, stderr=self.stderr)
-        self.stdout.write(self.style.SUCCESS('Réinitialisation et importation terminés avec succès !'))
+        self.stdout.write(self.style.SUCCESS('Réinitialisation et importation terminées avec succès !'))

@@ -12,7 +12,6 @@ from dashboard.auth_views import (
     LoginAPIView,
     LogoutAPIView,
     MeAPIView,
-    PublicSitesAPIView,
     RegisterAPIView,
 )
 from dashboard.rapport_views import (
@@ -20,7 +19,6 @@ from dashboard.rapport_views import (
     NormeCsvAPIView,
     NormeMetaAPIView,
     NormeXlsxAPIView,
-    RapportSoumissionListAPIView,
     RapportUploadAPIView,
 )
 from dashboard.views import (
@@ -53,13 +51,11 @@ urlpatterns = [
     path('auth/logout', LogoutAPIView.as_view(), name='api-auth-logout'),
     path('auth/me', MeAPIView.as_view(), name='api-auth-me'),
     path('auth/csrf', CsrfAPIView.as_view(), name='api-auth-csrf'),
-    path('auth/sites', PublicSitesAPIView.as_view(), name='api-auth-sites'),
 
     path('rapports/norme', NormeMetaAPIView.as_view(), name='api-norme-meta'),
     path('rapports/norme.csv', NormeCsvAPIView.as_view(), name='api-norme-csv'),
     path('rapports/norme.xlsx', NormeXlsxAPIView.as_view(), name='api-norme-xlsx'),
     path('rapports/upload', RapportUploadAPIView.as_view(), name='api-rapport-upload'),
-    path('rapports/soumissions', RapportSoumissionListAPIView.as_view(), name='api-rapport-soumissions'),
     path('rapports/mes', MesRapportsAPIView.as_view(), name='api-rapports-mes'),
 
     path('schema/', SpectacularAPIView.as_view(), name='schema'),

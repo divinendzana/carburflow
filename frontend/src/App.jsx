@@ -102,10 +102,16 @@ function AppRoutes() {
   }
 
   if (!isAuthenticated) {
+    if (view === 'home') {
+      return <HomePage onNavigate={navigate} />
+    }
     return <AuthPage onNavigate={navigate} initialMode="login" />
   }
 
   if (!isAdmin) {
+    if (view === 'home') {
+      return <HomePage onNavigate={navigate} />
+    }
     return <ReportsPage onNavigate={navigate} />
   }
 

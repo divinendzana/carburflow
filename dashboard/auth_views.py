@@ -8,11 +8,10 @@ from drf_spectacular.utils import extend_schema
 
 from dashboard.auth_serializers import (
     LoginSerializer,
-    PublicSiteSerializer,
     RegisterSerializer,
     UserSerializer,
 )
-from dashboard.models import Site, UserProfile
+from dashboard.models import UserProfile
 from dashboard.permissions import get_user_role
 
 
@@ -84,13 +83,3 @@ class CsrfAPIView(APIView):
     @extend_schema(tags=['Auth'], summary='Jeton CSRF')
     def get(self, request):
         return Response({'csrfToken': get_token(request)})
-
-
-class PublicSitesAPIView(APIView):
-    permission_classes = [AllowAny]
-    authentication_classes = []
-
-    @extend_schema(responses={200: PublicSiteSerializer(many=True)}, tags=['Auth'], summary='Sites publics (inscription)')
-    def get(self, request):
-        sites = Site.objects.all().order_by('nom_site')
-        return Response(PublicSiteSerializer(sites, many=True).data)
