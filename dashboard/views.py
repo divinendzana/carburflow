@@ -195,6 +195,8 @@ def get_etat_cuves_context(selected_site_id=None):
 
 def get_evolution_volumes_context():
     """Calcul des données de métrique #4 : Courbe d'évolution du volume total dans les cuves."""
+    from dashboard.analytics import total_installed_capacity
+
     reports = list(Rapport.objects.order_by('date_debut', 'id'))
     labels = [
         f"{r.date_debut.strftime('%d/%m')} au {r.date_fin.strftime('%d/%m')}"
@@ -206,10 +208,12 @@ def get_evolution_volumes_context():
 
     site_volumes = {s.id: [] for s in sites}
     global_volumes = []
+    cp_volumes = []
 
     for r in reports:
         lignes = LigneRapport.objects.filter(rapport=r)
         r_total = 0.0
+        r_cp = 0.0
         for s in sites:
             site_lignes = lignes.filter(cuve_principale__site=s)
             # Formule de la métrique 4 : volume total dans les cuves = somme des volumes des cuves principales + journalières.
@@ -218,7 +222,9 @@ def get_evolution_volumes_context():
             tot = cp_vol + cj_vol
             site_volumes[s.id].append(tot)
             r_total += tot
+            r_cp += cp_vol
         global_volumes.append(r_total)
+        cp_volumes.append(r_cp)
 
     per_report_distrib = []
     for idx in range(len(reports)):
@@ -272,6 +278,11 @@ def get_evolution_volumes_context():
             for item in sites_series_sorted
         ]),
         'volume_summary': latest_summary,
+        'total_capacity': total_installed_capacity(),
+        'cp_volumes_json': json.dumps(cp_volumes),
+        'period_days_json': json.dumps([
+            (r.date_fin - r.date_debut).days + 1 for r in reports
+        ]),
     }
 
 
@@ -584,6 +595,9 @@ class EvolutionVolumesAPIView(APIView):
             'labels': json.loads(context['chart_labels_json']),
             'global_volumes': json.loads(context['global_series_json']),
             'sites_series': json.loads(context['sites_series_json']),
+            'cp_volumes': json.loads(context['cp_volumes_json']),
+            'total_capacity': context['total_capacity'],
+            'period_days': json.loads(context['period_days_json']),
         })
 
 
@@ -733,6 +747,21 @@ class CuvesDashboardAPIView(APIView):
                 for block in ctx['journalier_blocks']
             ],
         })
+
+
+class AlertesAPIView(APIView):
+    """Endpoint API analytique pour la page Alertes."""
+
+    @extend_schema(
+        summary="Alertes & synthèse opérationnelle",
+        description="Alertes critiques/significatives de niveau, top 10 des sites les plus "
+                    "gourmands, autonomie globale en jours et indicateurs de stock global.",
+        responses={200: dict}
+    )
+    def get(self, request):
+        from dashboard.analytics import get_alertes_context
+
+        return Response(get_alertes_context())
 
 
 # --- ViewSets REST Standard ---

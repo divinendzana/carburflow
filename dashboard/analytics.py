@@ -249,6 +249,167 @@ def build_groupe_timeseries():
     }
 
 
+def total_installed_capacity() -> float:
+    """Capacité totale installée (cuves principales + journalières), métrique statique."""
+    cp_cap = sum((cp.capacite or 0.0) for cp in CuvePrincipale.objects.all())
+    cj_cap = sum((cj.capacite or 0.0) for cj in CuveJournaliere.objects.all())
+    return round(cp_cap + cj_cap, 1)
+
+
+def _classify_fill(pct: float) -> str:
+    """Code couleur par seuil de remplissage : ok ≥ 50 %, significant 20–50 %, critical < 20 %."""
+    if pct >= 50:
+        return 'ok'
+    if pct >= 20:
+        return 'significant'
+    return 'critical'
+
+
+def get_alertes_context() -> dict:
+    """Contexte de la page Alertes : anomalies de niveau, sites les plus gourmands,
+    autonomie globale en jours et indicateurs de stock global.
+    Toutes les valeurs reposent sur le dernier rapport (et l'avant-dernier pour la conso)."""
+    result = {
+        'latest_period_label': None,
+        'total_stock': 0.0,
+        'total_capacity': total_installed_capacity(),
+        'global_pct': 0.0,
+        'daily_consumption': 0.0,
+        'global_autonomy_days': None,
+        'critical': [],
+        'significant': [],
+        'top_consumers': [],
+    }
+
+    reports = list(Rapport.objects.order_by('date_debut', 'id'))
+    if not reports:
+        return result
+
+    latest = reports[-1]
+    result['latest_period_label'] = (
+        f"{latest.date_debut.strftime('%d/%m/%Y')} → {latest.date_fin.strftime('%d/%m/%Y')}"
+    )
+
+    sites = list(Site.objects.prefetch_related('cuves_principales__cuves_journalieres').all())
+    site_by_id = {s.id: s for s in sites}
+
+    # Volumes du dernier rapport, par cuve.
+    cp_vol: dict[int, float] = {}
+    cj_vol: dict[int, float] = {}
+    for line in LigneRapport.objects.filter(rapport=latest):
+        if line.cuve_principale_id:
+            cp_vol[line.cuve_principale_id] = max(cp_vol.get(line.cuve_principale_id, 0.0), line.quantite_gasoil_cuve_principale)
+        if line.cuve_journaliere_id:
+            cj_vol[line.cuve_journaliere_id] = max(cj_vol.get(line.cuve_journaliere_id, 0.0), line.quantite_gasoil_cuve_journaliere)
+
+    total_stock = 0.0
+    site_stock: dict[int, float] = {s.id: 0.0 for s in sites}
+
+    for site in sites:
+        for cp in site.cuves_principales.all():
+            cap = cp.capacite or 0.0
+            vol = cp_vol.get(cp.id, 0.0)
+            total_stock += vol
+            site_stock[site.id] += vol
+            if cap > 0:
+                pct = round(vol / cap * 100, 1)
+                level = _classify_fill(pct)
+                if level in ('critical', 'significant'):
+                    result[level].append({
+                        'level': level,
+                        'type': 'Cuve principale',
+                        'label': f"CP #{cp.id} — {site.nom_site}",
+                        'site': site.nom_site,
+                        'pct': pct,
+                        'volume': round(vol, 1),
+                        'capacity': round(cap, 1),
+                    })
+            for cj in cp.cuves_journalieres.all():
+                capj = cj.capacite or 0.0
+                volj = cj_vol.get(cj.id, 0.0)
+                total_stock += volj
+                site_stock[site.id] += volj
+                if capj > 0:
+                    pctj = round(volj / capj * 100, 1)
+                    lvlj = _classify_fill(pctj)
+                    if lvlj in ('critical', 'significant'):
+                        result[lvlj].append({
+                            'level': lvlj,
+                            'type': 'Cuve journalière',
+                            'label': f"CJ #{cj.id} — {site.nom_site}",
+                            'site': site.nom_site,
+                            'pct': pctj,
+                            'volume': round(volj, 1),
+                            'capacity': round(capj, 1),
+                        })
+
+    result['total_stock'] = round(total_stock, 1)
+    if result['total_capacity'] > 0:
+        result['global_pct'] = round(total_stock / result['total_capacity'] * 100, 1)
+
+    # Consommation du dernier rapport par site : stock précédent + dépotages − stock actuel.
+    def _site_of(line) -> int | None:
+        if line.cuve_principale_id:
+            return line.cuve_principale.site_id
+        if line.cuve_journaliere_id:
+            return line.cuve_journaliere.cuve_principale.site_id
+        return None
+
+    site_consumption: dict[int, float] = {s.id: 0.0 for s in sites}
+    if len(reports) >= 2:
+        previous = reports[-2]
+        prev_stock: dict[int, float] = {}
+        for line in LigneRapport.objects.filter(rapport=previous).select_related(
+            'cuve_principale', 'cuve_journaliere__cuve_principale'
+        ):
+            sid = _site_of(line)
+            if sid:
+                prev_stock[sid] = prev_stock.get(sid, 0.0) + line.quantite_gasoil_cuve_principale + line.quantite_gasoil_cuve_journaliere
+
+        cur_stock: dict[int, float] = {}
+        cur_depot: dict[int, float] = {}
+        for line in LigneRapport.objects.filter(rapport=latest).select_related(
+            'cuve_principale', 'cuve_journaliere__cuve_principale'
+        ):
+            sid = _site_of(line)
+            if sid:
+                cur_stock[sid] = cur_stock.get(sid, 0.0) + line.quantite_gasoil_cuve_principale + line.quantite_gasoil_cuve_journaliere
+                cur_depot[sid] = cur_depot.get(sid, 0.0) + line.depotage
+
+        for site in sites:
+            consumed = max(0.0, prev_stock.get(site.id, 0.0) + cur_depot.get(site.id, 0.0) - cur_stock.get(site.id, 0.0))
+            site_consumption[site.id] = round(consumed, 1)
+
+    # Nombre de jours couverts par le dernier rapport (pour passer d'une conso hebdo à journalière).
+    period_days = (latest.date_fin - latest.date_debut).days + 1
+    if period_days <= 0:
+        period_days = 7
+
+    top = sorted(site_consumption.items(), key=lambda kv: kv[1], reverse=True)[:10]
+    result['top_consumers'] = [
+        {
+            'site': site_by_id[sid].nom_site,
+            'consumption': value,
+            'daily_consumption': round(value / period_days, 1),
+            'stock': round(site_stock.get(sid, 0.0), 1),
+            'autonomy_days': round(site_stock.get(sid, 0.0) / (value / period_days), 1) if value > 0 else None,
+        }
+        for sid, value in top
+        if value > 0
+    ]
+
+    total_period_consumption = sum(site_consumption.values())
+    daily = total_period_consumption / period_days
+    result['daily_consumption'] = round(daily, 1)
+    result['global_autonomy_days'] = round(total_stock / daily, 1) if daily > 0 else None
+
+    # Alertes triées : les plus basses d'abord.
+    result['critical'].sort(key=lambda a: a['pct'])
+    result['significant'].sort(key=lambda a: a['pct'])
+
+    return result
+
+
 def resolve_period_indices(report_ids: list[int], debut_id=None, fin_id=None) -> tuple[int, int]:
     """Résout les indices de début/fin à partir des IDs de rapport."""
     if not report_ids:

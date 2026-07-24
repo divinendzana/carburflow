@@ -148,3 +148,5 @@ venv/
 
 .docx
 .doc
+# Navigateurs Playwright (vérification frontend)
+frontend/.pw-browsers/

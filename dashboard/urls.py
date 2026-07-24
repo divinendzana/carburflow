@@ -17,6 +17,7 @@ from dashboard.views import (
     EvolutionVolumesAPIView,
     HorairesGroupesAPIView,
     ConsommationAPIView,
+    AlertesAPIView,
     GroupesDashboardAPIView,
     SiteViewSet,
     CuvePrincipaleViewSet,
@@ -48,6 +49,7 @@ urlpatterns = [
     path('dashboard/evolution_volumes', EvolutionVolumesAPIView.as_view(), name='api-dashboard-evolution-volumes'),
     path('dashboard/horaires_groupes', HorairesGroupesAPIView.as_view(), name='api-dashboard-horaires-groupes'),
     path('dashboard/consommation', ConsommationAPIView.as_view(), name='api-dashboard-consommation'),
+    path('dashboard/alertes', AlertesAPIView.as_view(), name='api-dashboard-alertes'),
     path('dashboard/groupes', GroupesDashboardAPIView.as_view(), name='api-dashboard-groupes'),
     path('dashboard/cuves', CuvesDashboardAPIView.as_view(), name='api-dashboard-cuves'),
 
