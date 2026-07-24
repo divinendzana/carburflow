@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
+import { authFetch } from '../auth.js'
 
 const renderDelta = (metric, suffix = '') => {
   if (metric?.has_previous_period === false) {
@@ -32,7 +33,7 @@ function CuvesPage({ onNavigate }) {
 
   const loadCuvesData = async (queryParams = '') => {
     try {
-      const response = await fetch(`/api/v1/dashboard/cuves${queryParams ? `?${queryParams}` : ''}`)
+      const response = await authFetch(`/api/v1/dashboard/cuves${queryParams ? `?${queryParams}` : ''}`)
       const data = await response.json()
       setCuvesData(data)
       setRapportDebut(data.selected_rapport_debut ?? '')

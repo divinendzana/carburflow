@@ -4,9 +4,28 @@ import DashboardPage from './pages/DashboardPage.jsx'
 import SitesPage from './pages/SitesPage.jsx'
 import CuvesPage from './pages/CuvesPage.jsx'
 import GroupsPage from './pages/GroupsPage.jsx'
+import AuthPage from './pages/AuthPage.jsx'
+import ReportsPage from './pages/ReportsPage.jsx'
+import { AuthProvider, useAuth } from './context/AuthContext.jsx'
 
-function App() {
-  const [view, setView] = useState('home')
+const ADMIN_VIEWS = new Set(['home', 'dashboard', 'sites', 'cuves', 'groups'])
+const USER_VIEWS = new Set(['reports'])
+const PUBLIC_VIEWS = new Set(['home', 'login', 'register'])
+
+function resolveViewFromPath(pathname) {
+  if (pathname.startsWith('/groupes')) return 'groups'
+  if (pathname.startsWith('/sites')) return 'sites'
+  if (pathname.startsWith('/cuves')) return 'cuves'
+  if (pathname.startsWith('/dashboard')) return 'dashboard'
+  if (pathname.startsWith('/rapports')) return 'reports'
+  if (pathname.startsWith('/register')) return 'register'
+  if (pathname.startsWith('/login')) return 'login'
+  return 'home'
+}
+
+function AppRoutes() {
+  const { isAuthenticated, isAdmin, loading } = useAuth()
+  const [view, setView] = useState(() => resolveViewFromPath(window.location.pathname))
 
   const navigate = (nextView, options = {}) => {
     if (typeof nextView === 'object' && nextView !== null) {
@@ -20,39 +39,34 @@ function App() {
       sites: '/sites/',
       cuves: '/cuves/',
       groups: '/groupes/',
+      reports: '/rapports/',
+      login: '/login/',
+      register: '/register/',
     }
 
-    if (!nextView) {
-      nextView = 'home'
+    if (!nextView) nextView = 'home'
+
+    if (!loading) {
+      if (!isAuthenticated && !PUBLIC_VIEWS.has(nextView)) {
+        nextView = 'login'
+      } else if (isAuthenticated && !isAdmin && !USER_VIEWS.has(nextView) && nextView !== 'login' && nextView !== 'register') {
+        nextView = 'reports'
+      }
     }
 
     let nextPath = pathMap[nextView] || '/'
     if (nextView === 'sites') {
       const params = []
-      if (options.siteId != null && options.siteId !== '') {
-        params.push(`siteId=${encodeURIComponent(options.siteId)}`)
-      }
-      if (options.siteName != null && options.siteName !== '') {
-        params.push(`siteName=${encodeURIComponent(options.siteName)}`)
-      }
-      if (params.length) {
-        nextPath += `?${params.join('&')}`
-      }
+      if (options.siteId != null && options.siteId !== '') params.push(`siteId=${encodeURIComponent(options.siteId)}`)
+      if (options.siteName != null && options.siteName !== '') params.push(`siteName=${encodeURIComponent(options.siteName)}`)
+      if (params.length) nextPath += `?${params.join('&')}`
     }
     if (nextView === 'groups') {
       const params = []
-      if (options.groupId != null && options.groupId !== '') {
-        params.push(`groupId=${encodeURIComponent(options.groupId)}`)
-      }
-      if (options.groupLabel != null && options.groupLabel !== '') {
-        params.push(`groupLabel=${encodeURIComponent(options.groupLabel)}`)
-      }
-      if (options.mode != null && options.mode !== '') {
-        params.push(`mode=${encodeURIComponent(options.mode)}`)
-      }
-      if (params.length) {
-        nextPath += `?${params.join('&')}`
-      }
+      if (options.groupId != null && options.groupId !== '') params.push(`groupId=${encodeURIComponent(options.groupId)}`)
+      if (options.groupLabel != null && options.groupLabel !== '') params.push(`groupLabel=${encodeURIComponent(options.groupLabel)}`)
+      if (options.mode != null && options.mode !== '') params.push(`mode=${encodeURIComponent(options.mode)}`)
+      if (params.length) nextPath += `?${params.join('&')}`
     }
 
     window.history.pushState({}, '', nextPath)
@@ -60,31 +74,40 @@ function App() {
   }
 
   useEffect(() => {
-    const syncViewFromLocation = () => {
-      const pathname = window.location.pathname
-      if (pathname.startsWith('/groupes')) {
-        setView('groups')
-        return
-      }
-      if (pathname.startsWith('/sites')) {
-        setView('sites')
-        return
-      }
-      if (pathname.startsWith('/cuves')) {
-        setView('cuves')
-        return
-      }
-      if (pathname.startsWith('/dashboard')) {
-        setView('dashboard')
-        return
-      }
-      setView('home')
-    }
-
-    syncViewFromLocation()
-    window.addEventListener('popstate', syncViewFromLocation)
-    return () => window.removeEventListener('popstate', syncViewFromLocation)
+    const sync = () => setView(resolveViewFromPath(window.location.pathname))
+    sync()
+    window.addEventListener('popstate', sync)
+    return () => window.removeEventListener('popstate', sync)
   }, [])
+
+  useEffect(() => {
+    if (loading) return
+    if (!isAuthenticated && !PUBLIC_VIEWS.has(view)) {
+      window.history.replaceState({}, '', '/login/')
+      setView('login')
+      return
+    }
+    if (isAuthenticated && !isAdmin && !USER_VIEWS.has(view) && view !== 'login' && view !== 'register') {
+      window.history.replaceState({}, '', '/rapports/')
+      setView('reports')
+    }
+  }, [loading, view, isAuthenticated, isAdmin])
+
+  if (loading) {
+    return <div className="auth-loading"><div className="auth-loading-card">Chargement de votre session…</div></div>
+  }
+
+  if (view === 'login' || view === 'register') {
+    return <AuthPage onNavigate={navigate} initialMode={view} />
+  }
+
+  if (!isAuthenticated) {
+    return <AuthPage onNavigate={navigate} initialMode="login" />
+  }
+
+  if (!isAdmin) {
+    return <ReportsPage onNavigate={navigate} />
+  }
 
   return (
     <>
@@ -93,7 +116,17 @@ function App() {
       {view === 'sites' && <SitesPage onNavigate={navigate} />}
       {view === 'cuves' && <CuvesPage onNavigate={navigate} />}
       {view === 'groups' && <GroupsPage onNavigate={navigate} />}
+      {view === 'reports' && <ReportsPage onNavigate={navigate} />}
+      {!ADMIN_VIEWS.has(view) && <HomePage onNavigate={navigate} />}
     </>
+  )
+}
+
+function App() {
+  return (
+    <AuthProvider>
+      <AppRoutes />
+    </AuthProvider>
   )
 }
 
