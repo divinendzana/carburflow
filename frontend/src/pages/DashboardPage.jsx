@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar'
+import PageHeader from '../components/PageHeader'
 import FilterBar from '../components/FilterBar'
 import { LineChart, BarChart, MixedChart } from '../components/ChartCanvas'
 import { LoadingState, DemoBanner } from '../components/PageState'
@@ -7,25 +8,22 @@ import { fetchDashboardMetrics, fetchAlertes } from '../lib/api'
 import { fmt, fmtInt } from '../lib/format'
 
 const FILL_COLORS = {
-  ok: '#198754',
-  warn: '#ffc107',
-  danger: '#dc3545',
+  ok: '#1f7a4d',
+  warn: '#c9891a',
+  danger: '#c23b3b',
 }
+
+const TABS = [
+  { id: 'niveaux', label: 'Niveaux des cuves', help: 'Où en est le stock aujourd’hui ?' },
+  { id: 'conso', label: 'Consommation', help: 'Combien a-t-on consommé ?' },
+  { id: 'heures', label: 'Heures de marche', help: 'Combien d’heures les groupes ont tourné ?' },
+  { id: 'stock', label: 'Évolution du stock', help: 'Comment le stock évolue dans le temps ?' },
+]
 
 function fillTone(pct) {
   if (pct >= 50) return 'ok'
   if (pct >= 20) return 'warn'
   return 'danger'
-}
-
-function ThresholdLegend() {
-  return (
-    <div className="threshold-legend">
-      <span><i className="threshold-ok" /> Optimal ≥ 50 %</span>
-      <span><i className="threshold-warn" /> Moyen 20–50 %</span>
-      <span><i className="threshold-danger" /> Critique &lt; 20 %</span>
-    </div>
-  )
 }
 
 function ModeToggle({ value, onChange, options }) {
@@ -45,74 +43,8 @@ function ModeToggle({ value, onChange, options }) {
   )
 }
 
-function KpiStrip({ etatCuves, consommation, horaires, alertes, capacity }) {
-  const autonomy = alertes?.global_autonomy_days
-  const kpis = [
-    {
-      label: 'Capacité installée',
-      value: fmt(capacity, 'L'),
-      sub: 'métrique statique (toutes cuves)',
-    },
-    {
-      label: 'Stock global',
-      value: fmt(etatCuves?.total_volume_global, 'L'),
-      sub: `remplissage ${fmt(etatCuves?.global_pct, '%')}`,
-      tone: fillTone(etatCuves?.global_pct ?? 100),
-    },
-    {
-      label: 'Autonomie globale',
-      value: autonomy != null ? fmt(autonomy, 'jours') : '∞',
-      sub: 'stock ÷ conso. journalière (tous sites)',
-      tone: autonomy != null && autonomy < 30 ? 'danger' : autonomy != null && autonomy < 60 ? 'warn' : 'ok',
-    },
-    {
-      label: 'Conso. hebdomadaire',
-      value: fmt(consommation?.latest_total_liters ?? consommation?.global_consumption?.at(-1), 'L/sem'),
-      sub: 'dernier rapport, tous sites',
-    },
-    {
-      label: 'Heures de fonctionnement',
-      value: fmt(horaires?.latest_total_hours ?? horaires?.global_hours?.at(-1), 'h'),
-      sub: 'tous groupes, dernier rapport',
-    },
-  ]
-
-  return (
-    <section className="kpi-strip kpi-strip-5">
-      {kpis.map((kpi) => (
-        <div key={kpi.label} className={`kpi-card ${kpi.tone ? `kpi-${kpi.tone}` : ''}`}>
-          <span className="kpi-label">{kpi.label}</span>
-          <strong className="kpi-value">{kpi.value}</strong>
-          <span className="kpi-sub">{kpi.sub}</span>
-        </div>
-      ))}
-    </section>
-  )
-}
-
-function AlertsSummary({ alertes, onNavigate }) {
-  if (!alertes) return null
-  return (
-    <section className="alerts-summary">
-      <button type="button" className="alerts-summary-card" onClick={() => onNavigate('alertes')}>
-        <span className="kpi-label">Alertes critiques</span>
-        <strong style={{ color: 'var(--danger)' }}>{fmtInt(alertes.critical?.length)}</strong>
-        <span className="kpi-sub">niveaux &lt; 20 % — voir la page Alertes</span>
-      </button>
-      <button type="button" className="alerts-summary-card" onClick={() => onNavigate('alertes')}>
-        <span className="kpi-label">Alertes significatives</span>
-        <strong style={{ color: 'var(--accent)' }}>{fmtInt(alertes.significant?.length)}</strong>
-        <span className="kpi-sub">niveaux 20–50 %</span>
-      </button>
-      <button type="button" className="alerts-summary-card" onClick={() => onNavigate('alertes')}>
-        <span className="kpi-label">Top site gourmand</span>
-        <strong>{alertes.top_consumers?.[0]?.site || '—'}</strong>
-        <span className="kpi-sub">
-          {alertes.top_consumers?.[0] ? fmt(alertes.top_consumers[0].consumption, 'L') : 'pas de conso.'}
-        </span>
-      </button>
-    </section>
-  )
+function StatusDot({ tone }) {
+  return <span className={`status-dot status-${tone}`} aria-hidden="true" />
 }
 
 export default function DashboardPage({ onNavigate }) {
@@ -121,8 +53,9 @@ export default function DashboardPage({ onNavigate }) {
   const [demo, setDemo] = useState(false)
   const [periodStart, setPeriodStart] = useState(0)
   const [periodEnd, setPeriodEnd] = useState(0)
-  const [volumeMode, setVolumeMode] = useState('raw') // raw | relative | both
-  const [consoMode, setConsoMode] = useState('week') // week | day
+  const [tab, setTab] = useState('niveaux')
+  const [volumeMode, setVolumeMode] = useState('raw')
+  const [consoMode, setConsoMode] = useState('week')
 
   useEffect(() => {
     let cancelled = false
@@ -147,10 +80,10 @@ export default function DashboardPage({ onNavigate }) {
 
   if (!payload) {
     return (
-      <div className="app-shell dashboard-shell">
+      <div className="app-shell">
         <Topbar activeView="dashboard" onNavigate={onNavigate} />
-        <main className="dashboard-grid">
-          <LoadingState label="Chargement du dashboard…" />
+        <main className="page-stack">
+          <LoadingState label="Chargement de la vue d’ensemble…" />
         </main>
       </div>
     )
@@ -161,6 +94,9 @@ export default function DashboardPage({ onNavigate }) {
   const periodDays = range(evolutionVolumes.period_days || [])
   const reportChoices = (consommation.labels || []).map((label, index) => ({ id: index, label }))
   const capacity = evolutionVolumes.total_capacity || etatCuves.total_capacity_global || 0
+  const autonomy = alertes?.global_autonomy_days
+  const criticalCount = alertes?.critical?.length ?? 0
+  const significantCount = alertes?.significant?.length ?? 0
 
   const cpColors = (etatCuves.cp_chart_pcts || []).map((pct) => FILL_COLORS[fillTone(pct)])
   const dailySeries = Object.entries(etatCuves.sites_cj_chart_data || {}).flatMap(([siteId, series]) =>
@@ -169,7 +105,7 @@ export default function DashboardPage({ onNavigate }) {
       return {
         label: `${label} · site ${siteId}`,
         value,
-        color: series.colors?.[index] || FILL_COLORS[fillTone(value)],
+        color: FILL_COLORS[fillTone(value)],
       }
     }),
   )
@@ -180,7 +116,7 @@ export default function DashboardPage({ onNavigate }) {
     return days > 0 ? Number((value / days).toFixed(1)) : 0
   })
   const consumptionSeries = consoMode === 'day' ? dailyConsumption : weeklyConsumption
-  const consumptionUnit = consoMode === 'day' ? 'L/j' : 'L/sem'
+  const consumptionUnit = consoMode === 'day' ? 'L/j' : 'L/semaine'
 
   const globalVolumes = range(evolutionVolumes.global_volumes || [])
   const cpVolumes = range(evolutionVolumes.cp_volumes || evolutionVolumes.global_volumes || [])
@@ -192,18 +128,18 @@ export default function DashboardPage({ onNavigate }) {
   const volumeDatasets = []
   if (volumeMode === 'raw' || volumeMode === 'both') {
     volumeDatasets.push({
-      label: 'Volume brut',
+      label: 'Stock (litres)',
       data: globalVolumes,
-      borderColor: '#60a5fa',
-      backgroundColor: '#60a5fa22',
+      borderColor: '#0d6e7a',
+      backgroundColor: '#0d6e7a22',
       fill: volumeMode === 'raw',
       yAxisID: 'y',
       type: 'line',
     })
     volumeDatasets.push({
-      label: 'Capacité installée',
+      label: 'Capacité max',
       data: capacityLine,
-      borderColor: '#94a3b8',
+      borderColor: '#8aa0a8',
       borderDash: [6, 6],
       borderWidth: 2,
       pointRadius: 0,
@@ -214,10 +150,10 @@ export default function DashboardPage({ onNavigate }) {
   }
   if (volumeMode === 'relative' || volumeMode === 'both') {
     volumeDatasets.push({
-      label: 'Taux de remplissage',
+      label: 'Remplissage (%)',
       data: relativeVolumes,
-      borderColor: '#22c55e',
-      backgroundColor: '#22c55e22',
+      borderColor: '#1f7a4d',
+      backgroundColor: '#1f7a4d22',
       fill: volumeMode === 'relative',
       yAxisID: volumeMode === 'both' ? 'y1' : 'y',
       type: 'line',
@@ -232,178 +168,244 @@ export default function DashboardPage({ onNavigate }) {
     .sort((a, b) => b.total - a.total)
     .slice(0, 8)
 
+  const activeTab = TABS.find((item) => item.id === tab) || TABS[0]
+
   return (
-    <div className="app-shell dashboard-shell">
+    <div className="app-shell">
       <Topbar activeView="dashboard" onNavigate={onNavigate} />
       <DemoBanner visible={demo} />
 
-      <main className="dashboard-grid">
-        <KpiStrip
-          etatCuves={etatCuves}
-          consommation={consommation}
-          horaires={horairesGroupes}
-          alertes={alertes}
-          capacity={capacity}
+      <main className="page-stack">
+        <PageHeader
+          eyebrow="Vue d’ensemble"
+          title="Analyses & tendances"
+          description="L’accueil montre le capital (autonomie, alertes). Ici, vous creusez les courbes et les comparaisons."
         />
 
-        <AlertsSummary alertes={alertes} onNavigate={onNavigate} />
-
-        <section className="dashboard-cards">
-          <article className="metric-panel">
-            <div className="metric-toolbar">
-              <div>
-                <span className="metric-label">Métrique 1</span>
-                <h3 style={{ margin: '6px 0 0' }}>Volume actuel des cuves</h3>
-              </div>
-              <ThresholdLegend />
+        {(criticalCount > 0 || significantCount > 0) && (
+          <section className="attention-banner" role="region" aria-label="Points d’attention">
+            <div>
+              <strong>À regarder en priorité</strong>
+              <p>
+                {criticalCount > 0 && <>{fmtInt(criticalCount)} cuve{criticalCount > 1 ? 's' : ''} presque vide{criticalCount > 1 ? 's' : ''}</>}
+                {criticalCount > 0 && significantCount > 0 && ' · '}
+                {significantCount > 0 && <>{fmtInt(significantCount)} niveau{significantCount > 1 ? 'x' : ''} à surveiller</>}
+              </p>
             </div>
-            <div className="metric-split-grid">
-              <div className="chart-card">
-                <span className="curve-title">Cuves principales (% + code couleur)</span>
-                <BarChart
-                  labels={etatCuves.cp_chart_labels}
-                  datasets={[{
-                    label: 'Remplissage',
-                    data: etatCuves.cp_chart_pcts,
-                    backgroundColor: cpColors,
-                  }]}
-                  unit="%"
-                  height={280}
-                  tooltipLabel={(ctx) => {
-                    const quantity = etatCuves.cp_chart_quantities?.[ctx.dataIndex] ?? 0
-                    const tone = fillTone(ctx.parsed.y)
-                    const label = tone === 'ok' ? 'Optimal' : tone === 'warn' ? 'Moyen' : 'Critique'
-                    return ` ${ctx.parsed.y.toLocaleString('fr-FR')} % (${label}) • ${quantity.toLocaleString('fr-FR')} L`
-                  }}
-                />
-              </div>
-              <div className="chart-card">
-                <span className="curve-title">Cuves journalières (% + code couleur)</span>
-                <BarChart
-                  labels={dailySeries.map((item) => item.label)}
-                  datasets={[{
-                    label: 'Remplissage',
-                    data: dailySeries.map((item) => item.value),
-                    backgroundColor: dailySeries.map((item) => FILL_COLORS[fillTone(item.value)]),
-                  }]}
-                  unit="%"
-                  height={280}
-                />
-              </div>
+            <div className="attention-actions">
+              <button type="button" className="btn-primary" onClick={() => onNavigate('alertes')}>
+                Ouvrir les alertes
+              </button>
+              <button type="button" className="btn-ghost" onClick={() => onNavigate('presentation')}>
+                Retour à l’accueil
+              </button>
             </div>
+          </section>
+        )}
 
-            <div className="chart-card" style={{ marginTop: 16 }}>
-              <span className="curve-title">Corrélation consommation ↔ volume cuves principales</span>
-              <MixedChart
-                labels={labels}
-                leftUnit="L"
-                rightUnit="L"
-                height={300}
-                datasets={[
-                  {
-                    type: 'bar',
-                    label: 'Consommation',
-                    data: weeklyConsumption,
-                    backgroundColor: '#f59e0b99',
-                    borderColor: '#f59e0b',
-                    yAxisID: 'y',
-                  },
-                  {
-                    type: 'line',
-                    label: 'Stock cuves principales (CP)',
-                    data: cpVolumes,
-                    borderColor: '#0b3d7a',
-                    backgroundColor: '#0b3d7a22',
-                    fill: false,
-                    yAxisID: 'y1',
-                  },
-                ]}
-              />
-            </div>
-          </article>
+        <section className="kpi-strip kpi-strip-4" aria-label="Indicateurs clés">
+          <div className={`kpi-card kpi-featured ${autonomy != null && autonomy < 30 ? 'kpi-danger' : autonomy != null && autonomy < 60 ? 'kpi-warn' : 'kpi-ok'}`}>
+            <span className="kpi-label">Autonomie restante</span>
+            <strong className="kpi-value">{autonomy != null ? fmt(autonomy, 'jours') : '∞'}</strong>
+            <span className="kpi-sub">Au rythme actuel, tous sites confondus</span>
+          </div>
+          <div className={`kpi-card kpi-${fillTone(etatCuves?.global_pct ?? 100)}`}>
+            <span className="kpi-label">Stock disponible</span>
+            <strong className="kpi-value">{fmt(etatCuves?.total_volume_global, 'L')}</strong>
+            <span className="kpi-sub">
+              <StatusDot tone={fillTone(etatCuves?.global_pct ?? 100)} />
+              Rempli à {fmt(etatCuves?.global_pct, '%')}
+            </span>
+          </div>
+          <div className="kpi-card">
+            <span className="kpi-label">Consommé (dernier relevé)</span>
+            <strong className="kpi-value">{fmt(consommation?.latest_total_liters ?? consommation?.global_consumption?.at(-1), 'L')}</strong>
+            <span className="kpi-sub">Sur la dernière période de rapport</span>
+          </div>
+          <div className="kpi-card">
+            <span className="kpi-label">Heures de marche</span>
+            <strong className="kpi-value">{fmt(horairesGroupes?.latest_total_hours ?? horairesGroupes?.global_hours?.at(-1), 'h')}</strong>
+            <span className="kpi-sub">Tous les groupes, dernier relevé</span>
+          </div>
+        </section>
 
-          <FilterBar
-            idPrefix="dashboard"
-            reportChoices={reportChoices}
-            startValue={String(periodStart)}
-            endValue={String(periodEnd)}
-            onStartChange={(value) => setPeriodStart(Number(value))}
-            onEndChange={(value) => setPeriodEnd(Number(value))}
-          />
+        <FilterBar
+          idPrefix="dashboard"
+          reportChoices={reportChoices}
+          startValue={String(periodStart)}
+          endValue={String(periodEnd)}
+          onStartChange={(value) => setPeriodStart(Number(value))}
+          onEndChange={(value) => setPeriodEnd(Number(value))}
+          hint="Les graphiques ci-dessous suivent la période choisie."
+        />
 
-          <article className="metric-panel">
-            <div className="metric-toolbar">
-              <div>
-                <span className="metric-label">Métrique 2</span>
-                <h3 style={{ margin: '6px 0 0' }}>Consommation — fréquence hebdomadaire</h3>
+        <div className="section-tabs" role="tablist" aria-label="Thèmes de la vue d’ensemble">
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={tab === item.id}
+              className={`section-tab ${tab === item.id ? 'active' : ''}`}
+              onClick={() => setTab(item.id)}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        <section className="tab-panel" role="tabpanel">
+          <div className="tab-panel-intro">
+            <h2>{activeTab.label}</h2>
+            <p>{activeTab.help}</p>
+          </div>
+
+          {tab === 'niveaux' && (
+            <>
+              <div className="help-chips">
+                <span className="help-chip help-ok">Vert = OK (≥ 50 %)</span>
+                <span className="help-chip help-warn">Orange = à surveiller (20–50 %)</span>
+                <span className="help-chip help-danger">Rouge = critique (&lt; 20 %)</span>
               </div>
-              <ModeToggle
-                value={consoMode}
-                onChange={setConsoMode}
-                options={[
-                  { id: 'week', label: 'L / semaine' },
-                  { id: 'day', label: 'L / jour' },
-                ]}
-              />
-            </div>
-            <div className="metric-split-grid">
-              <div className="chart-card">
-                <span className="curve-title">
-                  {consoMode === 'week' ? 'Consommation hebdomadaire globale' : 'Consommation journalière moyenne'}
-                </span>
-                <BarChart
+              <div className="metric-split-grid">
+                <div className="chart-panel">
+                  <h3>Grandes cuves (stockage)</h3>
+                  <p className="chart-hint">Les réservoirs principaux de chaque site.</p>
+                  <BarChart
+                    labels={etatCuves.cp_chart_labels}
+                    datasets={[{ label: 'Remplissage', data: etatCuves.cp_chart_pcts, backgroundColor: cpColors }]}
+                    unit="%"
+                    horizontal={(etatCuves.cp_chart_labels || []).length > 4}
+                    height={Math.max(280, (etatCuves.cp_chart_labels || []).length * 36)}
+                    tooltipLabel={(ctx) => {
+                      const value = ctx.parsed.x ?? ctx.parsed.y
+                      const quantity = etatCuves.cp_chart_quantities?.[ctx.dataIndex] ?? 0
+                      const tone = fillTone(value)
+                      const label = tone === 'ok' ? 'OK' : tone === 'warn' ? 'À surveiller' : 'Critique'
+                      return ` ${Number(value).toLocaleString('fr-FR')} % (${label}) · ${quantity.toLocaleString('fr-FR')} L`
+                    }}
+                  />
+                </div>
+                <div className="chart-panel">
+                  <h3>Cuves du jour (alimentation groupes)</h3>
+                  <p className="chart-hint">Les petites cuves qui alimentent les groupes électrogènes.</p>
+                  <BarChart
+                    labels={dailySeries.map((item) => item.label)}
+                    datasets={[{
+                      label: 'Remplissage',
+                      data: dailySeries.map((item) => item.value),
+                      backgroundColor: dailySeries.map((item) => item.color),
+                    }]}
+                    unit="%"
+                    horizontal={dailySeries.length > 4}
+                    height={Math.max(280, dailySeries.length * 36)}
+                  />
+                </div>
+              </div>
+              <div className="chart-panel chart-panel-wide">
+                <h3>Consommation et stock des grandes cuves</h3>
+                <p className="chart-hint">Barres = carburant consommé. Courbe = stock restant dans les grandes cuves.</p>
+                <MixedChart
                   labels={labels}
-                  datasets={[{
-                    label: consoMode === 'week' ? 'L / semaine' : 'L / jour',
-                    data: consumptionSeries,
-                    backgroundColor: '#0b3d7a',
-                  }]}
-                  unit={consumptionUnit}
-                  height={280}
+                  leftUnit="L"
+                  rightUnit="L"
+                  height={300}
+                  datasets={[
+                    {
+                      type: 'bar',
+                      label: 'Consommé',
+                      data: weeklyConsumption,
+                      backgroundColor: '#e8a31799',
+                      borderColor: '#e8a317',
+                      yAxisID: 'y',
+                    },
+                    {
+                      type: 'line',
+                      label: 'Stock grandes cuves',
+                      data: cpVolumes,
+                      borderColor: '#0d4f5c',
+                      backgroundColor: '#0d4f5c22',
+                      fill: false,
+                      yAxisID: 'y1',
+                    },
+                  ]}
                 />
               </div>
-              <div className="chart-card">
-                <span className="curve-title">Top 8 sites (période sélectionnée)</span>
-                <BarChart
-                  labels={topSitesByConsumption.map((site) => site.label || site.nom_site)}
-                  datasets={[{
-                    label: 'Consommation',
-                    data: topSitesByConsumption.map((site) => Number(site.total.toFixed(1))),
-                    backgroundColor: '#3b82f6',
-                  }]}
-                  unit="L"
-                  height={280}
-                />
-              </div>
-            </div>
-          </article>
+            </>
+          )}
 
-          <article className="metric-panel">
-            <span className="metric-label">Métrique 3</span>
-            <h3>Variations horaires totales</h3>
+          {tab === 'conso' && (
+            <>
+              <div className="metric-toolbar">
+                <p className="chart-hint">Affichez la consommation par semaine ou en moyenne par jour.</p>
+                <ModeToggle
+                  value={consoMode}
+                  onChange={setConsoMode}
+                  options={[
+                    { id: 'week', label: 'Par semaine' },
+                    { id: 'day', label: 'Par jour' },
+                  ]}
+                />
+              </div>
+              <div className="metric-split-grid">
+                <div className="chart-panel">
+                  <h3>{consoMode === 'week' ? 'Consommation totale par semaine' : 'Moyenne par jour'}</h3>
+                  <BarChart
+                    labels={labels}
+                    datasets={[{
+                      label: consumptionUnit,
+                      data: consumptionSeries,
+                      backgroundColor: '#0d4f5c',
+                    }]}
+                    unit={consumptionUnit}
+                    height={280}
+                  />
+                </div>
+                <div className="chart-panel">
+                  <h3>Sites qui consomment le plus</h3>
+                  <p className="chart-hint">Top 8 sur la période sélectionnée — le plus gourmand en haut.</p>
+                  <BarChart
+                    labels={topSitesByConsumption.map((site) => site.label || site.nom_site)}
+                    datasets={[{
+                      label: 'Consommation',
+                      data: topSitesByConsumption.map((site) => Number(site.total.toFixed(1))),
+                      backgroundColor: topSitesByConsumption.map((_, i) => (i === 0 ? '#c23b3b' : '#e8a317')),
+                    }]}
+                    unit="L"
+                    horizontal
+                    height={Math.max(240, topSitesByConsumption.length * 38)}
+                  />
+                </div>
+              </div>
+            </>
+          )}
+
+          {tab === 'heures' && (
             <div className="metric-split-grid">
-              <div className="chart-card">
-                <span className="curve-title">Écart horaire global</span>
+              <div className="chart-panel">
+                <h3>Heures de marche (tous groupes)</h3>
+                <p className="chart-hint">Somme des heures ajoutées entre deux relevés.</p>
                 <LineChart
                   labels={labels}
                   datasets={[{
-                    label: 'Écart horaire global',
+                    label: 'Heures',
                     data: range(horairesGroupes.global_hours),
-                    borderColor: '#3b82f6',
-                    backgroundColor: '#3b82f622',
+                    borderColor: '#0d6e7a',
+                    backgroundColor: '#0d6e7a22',
                     fill: true,
                   }]}
                   unit="h"
                   height={280}
                 />
               </div>
-              <div className="chart-card">
-                <span className="curve-title">Écarts par groupe (aperçu — page Groupes pour le détail)</span>
+              <div className="chart-panel">
+                <h3>Quelques groupes (aperçu)</h3>
+                <p className="chart-hint">Pour le détail complet, ouvrez la page Groupes.</p>
                 <LineChart
                   labels={labels}
                   datasets={Object.values(horairesGroupes.sites_data || {})
                     .flatMap((site) => site.datasets || [])
-                    .slice(0, 6)
+                    .slice(0, 5)
                     .map((dataset) => ({
                       label: dataset.label,
                       data: range(dataset.data),
@@ -415,56 +417,46 @@ export default function DashboardPage({ onNavigate }) {
                   showLegend
                   height={280}
                 />
+                <button type="button" className="btn-ghost btn-inline" onClick={() => onNavigate('groups')}>
+                  Voir tous les groupes →
+                </button>
               </div>
             </div>
-          </article>
+          )}
 
-          <article className="metric-panel">
-            <div className="metric-toolbar">
-              <div>
-                <span className="metric-label">Métrique 4</span>
-                <h3 style={{ margin: '6px 0 0' }}>Volume total dans les cuves</h3>
-                <p className="group-header-meta">
-                  Capacité installée (statique) : {fmt(capacity, 'L')} — affichage en valeurs brutes et/ou en taux de remplissage.
+          {tab === 'stock' && (
+            <>
+              <div className="metric-toolbar">
+                <p className="chart-hint">
+                  Capacité totale installée : <strong>{fmt(capacity, 'L')}</strong> (valeur fixe).
                 </p>
+                <ModeToggle
+                  value={volumeMode}
+                  onChange={setVolumeMode}
+                  options={[
+                    { id: 'raw', label: 'En litres' },
+                    { id: 'relative', label: 'En %' },
+                    { id: 'both', label: 'Litres + %' },
+                  ]}
+                />
               </div>
-              <ModeToggle
-                value={volumeMode}
-                onChange={setVolumeMode}
-                options={[
-                  { id: 'raw', label: 'Valeurs (L)' },
-                  { id: 'relative', label: 'Taux (%)' },
-                  { id: 'both', label: 'L + %' },
-                ]}
-              />
-            </div>
-
-            <div className="chart-card">
-              <span className="curve-title">
-                {volumeMode === 'raw' && 'Courbe des valeurs brutes + capacité'}
-                {volumeMode === 'relative' && 'Courbe des taux de remplissage'}
-                {volumeMode === 'both' && 'Valeurs brutes (gauche) et taux % (droite)'}
-              </span>
-              {volumeMode === 'both' ? (
-                <MixedChart
-                  labels={labels}
-                  leftUnit="L"
-                  rightUnit="%"
-                  height={300}
-                  datasets={volumeDatasets}
-                />
-              ) : (
-                <LineChart
-                  labels={labels}
-                  datasets={volumeDatasets}
-                  unit={volumeMode === 'relative' ? '%' : 'L'}
-                  beginAtZero
-                  showLegend
-                  height={300}
-                />
-              )}
-            </div>
-          </article>
+              <div className="chart-panel chart-panel-wide">
+                <h3>Stock total dans le temps</h3>
+                {volumeMode === 'both' ? (
+                  <MixedChart labels={labels} leftUnit="L" rightUnit="%" height={300} datasets={volumeDatasets} />
+                ) : (
+                  <LineChart
+                    labels={labels}
+                    datasets={volumeDatasets}
+                    unit={volumeMode === 'relative' ? '%' : 'L'}
+                    beginAtZero
+                    showLegend
+                    height={300}
+                  />
+                )}
+              </div>
+            </>
+          )}
         </section>
       </main>
     </div>

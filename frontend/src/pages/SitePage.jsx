@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar'
+import PageHeader from '../components/PageHeader'
 import FilterBar from '../components/FilterBar'
 import StatBlock from '../components/StatBlock'
 import { LineChart } from '../components/ChartCanvas'
@@ -77,10 +78,10 @@ export default function SitePage({ onNavigate }) {
 
   if (!dashboard) {
     return (
-      <div className="app-shell dashboard-shell">
+      <div className="app-shell">
         <Topbar activeView="site" onNavigate={onNavigate} />
-        <main className="groups-grid">
-          <LoadingState label="Chargement des données du site…" />
+        <main className="page-stack">
+          <LoadingState label="Chargement du site…" />
         </main>
       </div>
     )
@@ -92,17 +93,23 @@ export default function SitePage({ onNavigate }) {
   const reportChoices = labels.map((label, index) => ({ id: index, label }))
 
   const panels = [
-    { key: 'hours', label: 'Variation horaire', title: 'Écart / période', unit: 'h', data: hoursData, color: '#3b82f6' },
-    { key: 'consumption', label: 'Consommation', title: 'Carburant / période', unit: 'L', data: consumptionData, color: '#60a5fa' },
-    { key: 'volume', label: 'Volume carburant', title: 'Volume total / période', unit: 'L', data: volumeData, color: '#0b3d7a' },
+    { key: 'hours', label: 'Heures de marche', title: 'Temps de fonctionnement', unit: 'h', data: hoursData, color: '#0d6e7a' },
+    { key: 'consumption', label: 'Consommation', title: 'Carburant consommé', unit: 'L', data: consumptionData, color: '#e8a317' },
+    { key: 'volume', label: 'Stock', title: 'Volume en cuves', unit: 'L', data: volumeData, color: '#0d4f5c' },
   ]
 
   return (
-    <div className="app-shell dashboard-shell">
+    <div className="app-shell">
       <Topbar activeView="site" onNavigate={onNavigate} />
       <DemoBanner visible={demo} />
 
-      <main className="groups-grid">
+      <main className="page-stack">
+        <PageHeader
+          eyebrow="Sites"
+          title={selected?.nom_site || 'Choisir un site'}
+          description="Sélectionnez un site et une période pour voir ses heures, sa consommation et son stock."
+        />
+
         <FilterBar
           idPrefix="site"
           reportChoices={reportChoices}
@@ -113,14 +120,10 @@ export default function SitePage({ onNavigate }) {
           sites={siteOptions}
           siteValue={siteId}
           onSiteChange={setSiteId}
+          hint="Changez le site ou la période pour actualiser les graphiques."
         />
 
         <section className="site-overview">
-          <div className="section-title-wrap">
-            <span className="metric-label">Sites</span>
-            <h2>{selected?.nom_site || 'Sites'}</h2>
-          </div>
-
           <div className="site-metric-grid">
             {panels.map((panel) => (
               <article key={panel.key} className="metric-panel site-metric-card">

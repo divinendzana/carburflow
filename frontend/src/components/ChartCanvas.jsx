@@ -27,7 +27,7 @@ Chart.register(
   Filler,
 )
 
-Chart.defaults.font.family = "Inter, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+Chart.defaults.font.family = "'Source Sans 3', 'Segoe UI', sans-serif"
 Chart.defaults.font.size = 11.5
 
 function cssVar(name) {
@@ -59,15 +59,22 @@ function baseScales(unit, { beginAtZero = false } = {}) {
   }
 }
 
-function tooltipFor(unit) {
+function tooltipFor(unit, { horizontal = false } = {}) {
   return {
     backgroundColor: 'rgba(10, 25, 47, 0.92)',
     padding: 10,
     cornerRadius: 10,
     displayColors: true,
     boxPadding: 4,
+    titleFont: { weight: '700' },
+    bodyFont: { size: 13 },
     callbacks: unit
-      ? { label: (ctx) => ` ${ctx.dataset.label ?? ''} : ${ctx.parsed.y.toLocaleString('fr-FR')} ${unit}` }
+      ? {
+          label: (ctx) => {
+            const value = horizontal ? ctx.parsed.x : ctx.parsed.y
+            return ` ${ctx.dataset.label ?? ''} : ${Number(value).toLocaleString('fr-FR')} ${unit}`
+          },
+        }
       : undefined,
   }
 }
@@ -97,10 +104,12 @@ export function LineChart({ labels = [], datasets = [], unit = '', beginAtZero =
       data: {
         labels,
         datasets: datasets.map((dataset) => ({
-          borderWidth: 2.5,
-          tension: 0.35,
-          pointRadius: 3,
-          pointHoverRadius: 6,
+          borderWidth: 3,
+          tension: 0.3,
+          pointRadius: 4,
+          pointHoverRadius: 7,
+          pointBackgroundColor: '#fff',
+          pointBorderWidth: 2,
           fill: dataset.fill ?? false,
           ...dataset,
         })),
@@ -110,8 +119,14 @@ export function LineChart({ labels = [], datasets = [], unit = '', beginAtZero =
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: showLegend ? { position: 'top', labels: { color: chartTheme().text, usePointStyle: true, boxHeight: 7 } } : { display: false },
-          tooltip: tooltipFor(unit),
+          legend: showLegend
+            ? { position: 'bottom', labels: { color: chartTheme().text, usePointStyle: true, boxHeight: 8, padding: 16 } }
+            : { display: false },
+          tooltip: {
+            ...tooltipFor(unit),
+            titleFont: { weight: '700' },
+            bodyFont: { size: 13 },
+          },
         },
         scales: baseScales(unit, { beginAtZero }),
       },
@@ -197,36 +212,55 @@ export function MixedChart({ labels = [], datasets = [], leftUnit = '', rightUni
   )
 }
 
-export function BarChart({ labels = [], datasets = [], unit = '', showLegend = false, height, tooltipLabel }) {
+export function BarChart({ labels = [], datasets = [], unit = '', showLegend = false, height, tooltipLabel, horizontal = false }) {
   const theme = useTheme()
   const canvasRef = useChart(
-    () => ({
-      type: 'bar',
-      data: {
-        labels,
-        datasets: datasets.map((dataset) => ({
-          borderRadius: 8,
-          maxBarThickness: 46,
-          ...dataset,
-        })),
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: showLegend ? { position: 'top', labels: { color: chartTheme().text } } : { display: false },
-          tooltip: {
-            ...tooltipFor(unit),
-            callbacks: tooltipLabel ? { label: tooltipLabel } : tooltipFor(unit).callbacks,
+    () => {
+      const palette = chartTheme()
+      const valueAxis = {
+        beginAtZero: true,
+        ticks: {
+          color: palette.text,
+          callback: (value) => (unit ? `${value.toLocaleString('fr-FR')} ${unit}` : value.toLocaleString('fr-FR')),
+        },
+        grid: { color: palette.grid },
+      }
+      const categoryAxis = {
+        ticks: { color: palette.text, maxRotation: horizontal ? 0 : 40, autoSkipPadding: 8 },
+        grid: { display: false },
+      }
+
+      return {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: datasets.map((dataset) => ({
+            borderRadius: horizontal ? 6 : 8,
+            maxBarThickness: horizontal ? 28 : 48,
+            borderSkipped: false,
+            ...dataset,
+          })),
+        },
+        options: {
+          indexAxis: horizontal ? 'y' : 'x',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: showLegend ? { position: 'bottom', labels: { color: palette.text, usePointStyle: true } } : { display: false },
+            tooltip: {
+              ...tooltipFor(unit, { horizontal }),
+              callbacks: tooltipLabel
+                ? { label: tooltipLabel }
+                : tooltipFor(unit, { horizontal }).callbacks,
+            },
           },
+          scales: horizontal
+            ? { x: valueAxis, y: categoryAxis }
+            : { x: categoryAxis, y: valueAxis },
         },
-        scales: {
-          ...baseScales(unit, { beginAtZero: true }),
-          x: { ticks: { color: chartTheme().text, maxRotation: 40, autoSkipPadding: 8 }, grid: { display: false } },
-        },
-      },
-    }),
-    [labels, datasets, unit, showLegend, tooltipLabel, theme],
+      }
+    },
+    [labels, datasets, unit, showLegend, tooltipLabel, horizontal, theme],
   )
 
   return (

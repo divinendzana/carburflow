@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Topbar from '../components/Topbar'
+import PageHeader from '../components/PageHeader'
 import { BarChart } from '../components/ChartCanvas'
 import { LoadingState, DemoBanner } from '../components/PageState'
 import {
@@ -90,9 +91,9 @@ function ManagementPanel({ onChanged }) {
   return (
     <section className="metric-section">
       <div className="section-title-wrap">
-        <span className="metric-label">Gestion</span>
-        <h2>Ajout et retrait de sites / groupes</h2>
-        <p className="group-header-meta">Création et suppression du parc supervisé via l'API REST.</p>
+        <span className="metric-label">Gestion du parc</span>
+        <h2>Ajouter ou retirer un site / un groupe</h2>
+        <p className="group-header-meta">Utilisez ces formulaires pour tenir à jour la liste des sites et des groupes suivis.</p>
       </div>
 
       {error && <div className="demo-banner" role="alert">{error}</div>}
@@ -185,9 +186,9 @@ export default function AlertesPage({ onNavigate }) {
 
   if (!alertes) {
     return (
-      <div className="app-shell dashboard-shell">
+      <div className="app-shell">
         <Topbar activeView="alertes" onNavigate={onNavigate} />
-        <main className="groups-grid">
+        <main className="page-stack">
           <LoadingState label="Analyse des alertes…" />
         </main>
       </div>
@@ -195,19 +196,25 @@ export default function AlertesPage({ onNavigate }) {
   }
 
   const kpis = [
-    { label: 'Autonomie globale', value: alertes.global_autonomy_days != null ? fmt(alertes.global_autonomy_days, 'jours') : '∞', sub: 'stock total ÷ conso. journalière', tone: alertes.global_autonomy_days != null && alertes.global_autonomy_days < 30 ? 'danger' : 'ok' },
-    { label: 'Stock global', value: fmt(alertes.total_stock, 'L'), sub: `sur ${fmt(alertes.total_capacity, 'L')}` },
-    { label: 'Remplissage global', value: fmt(alertes.global_pct, '%'), sub: 'toutes cuves', tone: alertes.global_pct >= 50 ? 'ok' : alertes.global_pct >= 20 ? 'warn' : 'danger' },
-    { label: 'Conso. journalière', value: fmt(alertes.daily_consumption, 'L/j'), sub: `dernier rapport (${alertes.latest_period_label || '—'})` },
-    { label: 'Alertes critiques', value: fmtInt(alertes.critical.length), sub: 'niveaux < 20 %', tone: alertes.critical.length ? 'danger' : 'ok' },
+    { label: 'Autonomie restante', value: alertes.global_autonomy_days != null ? fmt(alertes.global_autonomy_days, 'jours') : '∞', sub: 'Au rythme actuel, tous sites', tone: alertes.global_autonomy_days != null && alertes.global_autonomy_days < 30 ? 'danger' : 'ok' },
+    { label: 'Stock disponible', value: fmt(alertes.total_stock, 'L'), sub: `sur ${fmt(alertes.total_capacity, 'L')} de capacité` },
+    { label: 'Remplissage', value: fmt(alertes.global_pct, '%'), sub: 'Toutes les cuves', tone: alertes.global_pct >= 50 ? 'ok' : alertes.global_pct >= 20 ? 'warn' : 'danger' },
+    { label: 'Conso. par jour', value: fmt(alertes.daily_consumption, 'L/j'), sub: `Dernier relevé (${alertes.latest_period_label || '—'})` },
+    { label: 'Cuves critiques', value: fmtInt(alertes.critical.length), sub: 'Niveaux sous 20 %', tone: alertes.critical.length ? 'danger' : 'ok' },
   ]
 
   return (
-    <div className="app-shell dashboard-shell">
+    <div className="app-shell">
       <Topbar activeView="alertes" onNavigate={onNavigate} />
       <DemoBanner visible={demo} />
 
-      <main className="groups-grid">
+      <main className="page-stack">
+        <PageHeader
+          eyebrow="Alertes"
+          title="Ce qu’il faut surveiller"
+          description="Niveaux bas, sites qui consomment le plus, et gestion rapide du parc."
+        />
+
         <section className="kpi-strip kpi-strip-5">
           {kpis.map((kpi) => (
             <div key={kpi.label} className={`kpi-card ${kpi.tone ? `kpi-${kpi.tone}` : ''}`}>
@@ -221,28 +228,28 @@ export default function AlertesPage({ onNavigate }) {
         <section className="alerts-columns">
           <div className="alerts-block">
             <div className="section-title-wrap">
-              <span className="metric-label alert-title-critical">Critiques</span>
-              <h2>Niveaux critiques (&lt; 20 %)</h2>
+              <span className="metric-label alert-title-critical">Urgent</span>
+              <h2>Presque vides (&lt; 20 %)</h2>
             </div>
             <div className="alerts-list">
               {alertes.critical.length ? (
                 alertes.critical.map((alert) => <AlertCard key={alert.label} alert={alert} />)
               ) : (
-                <p className="management-empty">Aucune alerte critique. 🎉</p>
+                <p className="management-empty">Aucune cuve critique. Tout va bien.</p>
               )}
             </div>
           </div>
 
           <div className="alerts-block">
             <div className="section-title-wrap">
-              <span className="metric-label alert-title-significant">Significatives</span>
-              <h2>Niveaux à surveiller (20–50 %)</h2>
+              <span className="metric-label alert-title-significant">À surveiller</span>
+              <h2>Niveaux moyens (20–50 %)</h2>
             </div>
             <div className="alerts-list">
               {alertes.significant.length ? (
                 alertes.significant.map((alert) => <AlertCard key={alert.label} alert={alert} />)
               ) : (
-                <p className="management-empty">Aucune alerte significative.</p>
+                <p className="management-empty">Aucune alerte à surveiller.</p>
               )}
             </div>
           </div>
@@ -250,9 +257,9 @@ export default function AlertesPage({ onNavigate }) {
 
         <section className="metric-panel">
           <span className="metric-label">Classement</span>
-          <h3>Top 10 des sites les plus gourmands</h3>
+          <h3>Sites qui consomment le plus</h3>
           <p className="group-header-meta">
-            Consommation sur le dernier rapport ({alertes.latest_period_label || '—'}).
+            Sur le dernier relevé ({alertes.latest_period_label || '—'}).
           </p>
           <div className="chart-card" style={{ marginTop: 12 }}>
             <BarChart
@@ -260,7 +267,7 @@ export default function AlertesPage({ onNavigate }) {
               datasets={[{
                 label: 'Consommation',
                 data: alertes.top_consumers.map((item) => item.consumption),
-                backgroundColor: '#f59e0b',
+                backgroundColor: '#e8a317',
               }]}
               unit="L"
               height={300}
@@ -277,7 +284,7 @@ export default function AlertesPage({ onNavigate }) {
                 </span>
               </div>
             ))}
-            {!alertes.top_consumers.length && <p className="management-empty">Pas de consommation calculable (un seul rapport).</p>}
+            {!alertes.top_consumers.length && <p className="management-empty">Pas encore assez de relevés pour calculer la consommation.</p>}
           </div>
         </section>
 
