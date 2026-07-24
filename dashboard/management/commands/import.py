@@ -13,6 +13,7 @@ from dashboard.models import (
     GroupeElectrogene,
     Rapport,
     LigneRapport,
+    Site,
 )
 
 
@@ -141,6 +142,24 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.NOTICE(f"Importation depuis : {data_dir}"))
 
+        site_csv = data_dir / 'site.csv'
+        if site_csv.exists():
+            rows = self._read_csv_rows(site_csv)
+            for row in rows:
+                site_id = self._to_int(self._get_column(row, 'id_site', 'site_id', 'id'))
+                site_nom = self._get_column(row, 'nom_site', 'site', 'nom') or str(site_id)
+                site_localisation = self._get_column(row, 'localisation', 'lieu', 'adresse') or ''
+                if site_id is None:
+                    continue
+                Site.objects.update_or_create(
+                    id=site_id,
+                    defaults={
+                        'nom_site': site_nom,
+                        'localisation': site_localisation,
+                    },
+                )
+            self.stdout.write(self.style.SUCCESS("✔ Fichier site.csv importé"))
+
         cuve_p_csv = data_dir / 'cuve_principale.csv'
         if cuve_p_csv.exists():
             rows = self._read_csv_rows(cuve_p_csv)
@@ -150,11 +169,25 @@ class Command(BaseCommand):
                     cp_id = self._to_int(self._get_column(row, 'id', 'id_cuve_principale'))
                 if cp_id is None:
                     continue
+
+                site_raw = self._get_column(row, 'id_site', 'site_id', 'site')
+                site_obj = None
+                if site_raw not in (None, ''):
+                    site_id = self._to_int(site_raw)
+                    if site_id is not None:
+                        site_obj = Site.objects.filter(id=site_id).first()
+                    if site_obj is None:
+                        site_obj, _ = Site.objects.get_or_create(
+                            nom_site=str(site_raw),
+                            defaults={'localisation': ''},
+                        )
+
                 CuvePrincipale.objects.update_or_create(
                     id=cp_id,
                     defaults={
                         'identifiant': str(self._get_column(row, 'id_cuve_principale', 'id', 'id_cuve') or cp_id),
                         'capacite': self._to_float(self._get_column(row, 'capacite', 'capcite', 'capacité', 'capacity')),
+                        'site': site_obj,
                     },
                 )
             self.stdout.write(self.style.SUCCESS("✔ Fichier cuve_principale.csv importé"))

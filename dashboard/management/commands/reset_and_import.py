@@ -9,6 +9,7 @@ from dashboard.models import (
     GroupeElectrogene,
     Rapport,
     LigneRapport,
+    Site,
 )
 
 
@@ -50,6 +51,7 @@ class Command(BaseCommand):
         GroupeElectrogene.objects.all().delete()
         CuveJournaliere.objects.all().delete()
         CuvePrincipale.objects.all().delete()
+        Site.objects.all().delete()
 
         self.stdout.write(self.style.SUCCESS('✔ Données supprimées'))
 
