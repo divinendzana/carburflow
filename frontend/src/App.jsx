@@ -8,7 +8,12 @@ import GroupsPage from './pages/GroupsPage.jsx'
 function App() {
   const [view, setView] = useState('presentation')
 
-  const navigate = (nextView) => {
+  const navigate = (nextView, options = {}) => {
+    if (typeof nextView === 'object' && nextView !== null) {
+      options = { ...options, ...nextView }
+      nextView = nextView.view
+    }
+
     const pathMap = {
       presentation: '/',
       dashboard: '/dashboard/',
@@ -17,7 +22,24 @@ function App() {
       groups: '/groupes/',
     }
 
-    const nextPath = pathMap[nextView] || '/'
+    if (!nextView) {
+      nextView = 'presentation'
+    }
+
+    let nextPath = pathMap[nextView] || '/'
+    if (nextView === 'sites') {
+      const params = []
+      if (options.siteId != null && options.siteId !== '') {
+        params.push(`siteId=${encodeURIComponent(options.siteId)}`)
+      }
+      if (options.siteName != null && options.siteName !== '') {
+        params.push(`siteName=${encodeURIComponent(options.siteName)}`)
+      }
+      if (params.length) {
+        nextPath += `?${params.join('&')}`
+      }
+    }
+
     window.history.pushState({}, '', nextPath)
     setView(nextView)
   }

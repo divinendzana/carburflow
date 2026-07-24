@@ -10,8 +10,8 @@ function PresentationPage({ onNavigate }) {
     const loadOverviewData = async () => {
       try {
         const [siteResponse, etatCuvesResponse] = await Promise.all([
-          fetch('/sites?limit=1'),
-          fetch('/dashboard/etat_cuves'),
+          fetch('/api/v1/sites?limit=1'),
+          fetch('/api/v1/dashboard/etat_cuves'),
         ])
 
         const siteData = await siteResponse.json()

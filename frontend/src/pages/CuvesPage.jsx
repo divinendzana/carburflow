@@ -32,7 +32,7 @@ function CuvesPage({ onNavigate }) {
 
   const loadCuvesData = async (queryParams = '') => {
     try {
-      const response = await fetch(`/dashboard/cuves${queryParams ? `?${queryParams}` : ''}`)
+      const response = await fetch(`/api/v1/dashboard/cuves${queryParams ? `?${queryParams}` : ''}`)
       const data = await response.json()
       setCuvesData(data)
       setRapportDebut(data.selected_rapport_debut ?? '')

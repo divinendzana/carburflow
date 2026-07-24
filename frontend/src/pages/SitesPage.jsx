@@ -7,6 +7,8 @@ function SitesPage({ onNavigate }) {
   const [startIdx, setStartIdx] = useState(0)
   const [endIdx, setEndIdx] = useState(0)
   const [siteId, setSiteId] = useState(null)
+  const querySiteId = useMemo(() => new URLSearchParams(window.location.search).get('siteId'), [])
+  const querySiteName = useMemo(() => new URLSearchParams(window.location.search).get('siteName'), [])
 
   const safeValue = (value) => (typeof value === 'number' ? value : 0)
 
@@ -78,9 +80,9 @@ function SitesPage({ onNavigate }) {
     const loadSitesData = async () => {
       try {
         const [metric2, metric3, metric4] = await Promise.all([
-          fetch('/dashboard/evolution_volumes').then((response) => response.json()),
-          fetch('/dashboard/horaires_groupes').then((response) => response.json()),
-          fetch('/dashboard/consommation').then((response) => response.json()),
+          fetch('/api/v1/dashboard/evolution_volumes').then((response) => response.json()),
+          fetch('/api/v1/dashboard/horaires_groupes').then((response) => response.json()),
+          fetch('/api/v1/dashboard/consommation').then((response) => response.json()),
         ])
 
         setsitesDashboard({
@@ -114,18 +116,6 @@ function SitesPage({ onNavigate }) {
     loadSitesData()
   }, [])
 
-  useEffect(() => {
-    if (!sitesDashboard) return
-    const fallbackId = String(sitesDashboard.defaultSiteId ?? sitesDashboard.volumeSeries?.[0]?.id ?? '')
-    if ((siteId === null || siteId === '') && fallbackId) {
-      setSiteId(fallbackId)
-    }
-    if (sitesDashboard.labels?.length) {
-      setStartIdx(0)
-      setEndIdx(sitesDashboard.labels.length - 1)
-    }
-  }, [sitesDashboard, siteId])
-
   const siteOptions = useMemo(() => {
     if (!sitesDashboard) return []
     const byId = new Map()
@@ -134,6 +124,28 @@ function SitesPage({ onNavigate }) {
     })
     return [...byId.values()]
   }, [sitesDashboard])
+
+  useEffect(() => {
+    if (!sitesDashboard) return
+
+    const fallbackId = String(sitesDashboard.defaultSiteId ?? sitesDashboard.volumeSeries?.[0]?.id ?? '')
+    const selectedId = querySiteId || fallbackId
+    if ((siteId === null || siteId === '') && selectedId) {
+      setSiteId(selectedId)
+    }
+
+    if (querySiteId && querySiteName && sitesDashboard) {
+      const matchingSite = siteOptions.find((site) => String(site.id) === querySiteId || site.nom_site === querySiteName)
+      if (matchingSite) {
+        setSiteId(String(matchingSite.id))
+      }
+    }
+
+    if (sitesDashboard.labels?.length) {
+      setStartIdx(0)
+      setEndIdx(sitesDashboard.labels.length - 1)
+    }
+  }, [sitesDashboard, siteId, querySiteId, querySiteName, siteOptions])
 
   const selectedSite = useMemo(() => {
     if (!sitesDashboard) return null

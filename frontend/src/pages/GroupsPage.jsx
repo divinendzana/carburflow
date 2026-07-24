@@ -84,7 +84,7 @@ function GroupsPage({ onNavigate }) {
 
   const loadGroupsData = async (queryParams = '') => {
     try {
-      const response = await fetch(`/dashboard/groupes${queryParams ? `?${queryParams}` : ''}`)
+      const response = await fetch(`/api/v1/dashboard/groupes${queryParams ? `?${queryParams}` : ''}`)
       if (!response.ok) {
         throw new Error(`Backend error ${response.status}`)
       }
