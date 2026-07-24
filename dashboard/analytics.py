@@ -104,11 +104,17 @@ def _previous_period_label(labels: list[str], start_idx: int, end_idx: int) -> s
     return f"{labels[prev_start]} → {labels[prev_end]}"
 
 
+def _stock_change_consumption(previous_stock: float, current_stock: float, depotage: float) -> float:
+    """Consommation sur une période : stock initial + dépôts - stock final."""
+    consumption = previous_stock + depotage - current_stock
+    return round(max(0.0, consumption), 1)
+
+
 def build_groupe_timeseries():
     """Construit les séries temporelles horaires et consommation par groupe/site."""
     reports = list(Rapport.objects.order_by('date_debut', 'id'))
     labels = [
-        f"{r.date_debut.strftime('%d/%m')} au {r.date_fin.strftime('%d/%m')}"
+        f"{r.date_debut.strftime('%d/%m/%Y')} → {r.date_fin.strftime('%d/%m/%Y')}"
         for r in reports
     ]
     report_ids = [r.id for r in reports]
@@ -168,22 +174,60 @@ def build_groupe_timeseries():
     consumption_by_site = {s.id: [0.0] * n for s in sites}
     consumption_by_groupe = {g_id: [0.0] * n for g_id in all_groupe_ids}
 
+    report_group_stock = {g_id: [0.0] * n for g_id in all_groupe_ids}
+    report_group_depotage = {g_id: [0.0] * n for g_id in all_groupe_ids}
+    report_site_stock = {s.id: [0.0] * n for s in sites}
+    report_site_depotage = {s.id: [0.0] * n for s in sites}
+
+    for idx, r in enumerate(reports):
+        lignes = LigneRapport.objects.filter(rapport=r)
+        for line in lignes:
+            amount = line.quantite_gasoil_cuve_principale + line.quantite_gasoil_cuve_journaliere
+            depotage = line.depotage
+
+            if line.groupe_id and line.groupe_id in report_group_stock:
+                report_group_stock[line.groupe_id][idx] += amount
+                report_group_depotage[line.groupe_id][idx] += depotage
+
+            site_id = None
+            if line.groupe_id:
+                site_id = groupe_to_site.get(line.groupe_id)
+            if site_id is None and line.cuve_principale_id is not None:
+                site_id = line.cuve_principale.site_id
+            elif site_id is None and line.cuve_journaliere_id is not None:
+                site_id = line.cuve_journaliere.cuve_principale.site_id
+
+            if site_id is not None:
+                report_site_stock[site_id][idx] += amount
+                report_site_depotage[site_id][idx] += depotage
+
     for g_id in all_groupe_ids:
         compteurs = groupe_compteurs[g_id]
         rate = groupe_meta[g_id]['rate']
         site_id = groupe_to_site.get(g_id)
         for i in range(1, n):
             prev_val = compteurs[i - 1]
-            if prev_val <= 0:
-                continue
-            delta_h = max(0.0, compteurs[i] - prev_val)
-            consumed = round(delta_h * rate, 1)
-            hours_run_by_groupe[g_id][i] = round(delta_h, 1)
+            if prev_val > 0:
+                delta_h = max(0.0, compteurs[i] - prev_val)
+                hours_run_by_groupe[g_id][i] = round(delta_h, 1)
+                hours_run_global[i] += round(delta_h, 1)
+
+            prev_stock = report_group_stock[g_id][i - 1]
+            current_stock = report_group_stock[g_id][i]
+            depotages = report_group_depotage[g_id][i]
+            consumed = _stock_change_consumption(prev_stock, current_stock, depotages)
             consumption_by_groupe[g_id][i] = consumed
-            hours_run_global[i] += round(delta_h, 1)
             consumption_global[i] += consumed
             if site_id:
                 consumption_by_site[site_id][i] += consumed
+
+    for site_id, site_series in list(consumption_by_site.items()):
+        for i in range(1, n):
+            prev_stock = report_site_stock[site_id][i - 1]
+            current_stock = report_site_stock[site_id][i]
+            depotages = report_site_depotage[site_id][i]
+            consumed = _stock_change_consumption(prev_stock, current_stock, depotages)
+            consumption_by_site[site_id][i] = consumed
 
     hours_run_global = [round(v, 1) for v in hours_run_global]
     consumption_global = [round(v, 1) for v in consumption_global]
@@ -370,7 +414,7 @@ def get_cuves_page_context(rapport_debut_id=None, rapport_fin_id=None, site_id=N
     """Contexte complet pour la page Cuves avec filtres période et site."""
     reports = list(Rapport.objects.order_by('date_debut', 'id'))
     labels = [
-        f"{r.date_debut.strftime('%d/%m')} au {r.date_fin.strftime('%d/%m')}"
+        f"{r.date_debut.strftime('%d/%m/%Y')} → {r.date_fin.strftime('%d/%m/%Y')}"
         for r in reports
     ]
     report_ids = [r.id for r in reports]

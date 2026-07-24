@@ -1,6 +1,5 @@
 import json
 import statistics
-from django.shortcuts import render
 from django.db.models import Sum
 from rest_framework import viewsets
 from rest_framework.views import APIView
@@ -22,6 +21,174 @@ from dashboard.serializers import (
     RapportSerializer,
     LigneRapportSerializer,
 )
+
+
+def get_dashboard_kpi_context(selected_site_id=None):
+    """Contexte du dashboard KPI décisionnel avec alertes et KPI critiques."""
+    from dashboard.analytics import build_groupe_timeseries
+
+    sites = list(Site.objects.prefetch_related('cuves_principales__cuves_journalieres').all())
+    latest_rapport = Rapport.objects.order_by('-date_fin', '-id').first()
+    latest_lines = list(LigneRapport.objects.filter(rapport=latest_rapport).select_related('cuve_principale', 'cuve_journaliere', 'groupe')) if latest_rapport else []
+
+    site_volume_by_id = {site.id: 0.0 for site in sites}
+    site_capacity_by_id = {site.id: 0.0 for site in sites}
+    site_consumption_history = {site.id: [] for site in sites}
+    site_alerts = []
+
+    for site in sites:
+        total_capacity = 0.0
+        for cp in site.cuves_principales.all():
+            if cp.capacite and cp.capacite > 0:
+                total_capacity += float(cp.capacite)
+        site_capacity_by_id[site.id] = total_capacity
+
+        total_volume = 0.0
+        for line in latest_lines:
+            if line.cuve_principale and line.cuve_principale.site_id == site.id:
+                total_volume += (line.quantite_gasoil_cuve_principale or 0.0)
+            if line.cuve_journaliere and line.cuve_journaliere.cuve_principale.site_id == site.id:
+                total_volume += (line.quantite_gasoil_cuve_journaliere or 0.0)
+        site_volume_by_id[site.id] = total_volume
+
+    timeseries = build_groupe_timeseries()
+    group_ids = list(timeseries['groupe_meta'].keys())
+    consumption_by_groupe = timeseries['consumption_by_groupe']
+    hours_by_groupe = timeseries['hours_run_by_groupe']
+    hours_run_global = timeseries['hours_run_global']
+    consumption_global = timeseries['consumption_global']
+
+    def mean(values):
+        values = [float(v) for v in values if float(v) > 0]
+        return sum(values) / len(values) if values else 0.0
+
+    current_week_hours = float(hours_run_global[-1]) if hours_run_global else 0.0
+    mean_week_hours = mean(hours_run_global)
+    weekly_hours_gap_pct = ((current_week_hours - mean_week_hours) / mean_week_hours * 100.0) if mean_week_hours > 0 else 0.0
+
+    current_week_consumption = float(consumption_global[-1]) if consumption_global else 0.0
+    mean_week_consumption = mean(consumption_global)
+    weekly_consumption_gap_pct = ((current_week_consumption - mean_week_consumption) / mean_week_consumption * 100.0) if mean_week_consumption > 0 else 0.0
+
+    site_rows = []
+    for site in sites:
+        capacity = site_capacity_by_id[site.id]
+        volume = site_volume_by_id[site.id]
+        pct = round((volume / capacity) * 100.0, 1) if capacity > 0 else 0.0
+        site_rows.append({
+            'id': site.id,
+            'name': site.nom_site,
+            'volume': round(volume, 1),
+            'capacity': round(capacity, 1),
+            'pct': pct,
+            'below_threshold': pct > 0 and pct < 20.0,
+        })
+
+    sites_below_threshold = [row for row in site_rows if row['below_threshold']]
+    sites_over_consumption = []
+    consumption_by_site = timeseries.get('consumption_by_site', {})
+    for site in sites:
+        series = consumption_by_site.get(site.id, [])
+        if not series:
+            continue
+        # previous history excludes the latest report
+        history = [float(v) for v in series[:-1]] if len(series) > 1 else [0.0]
+        avg = sum(history) / len(history) if history else 0.0
+        current = float(series[-1])
+        delta = round(current - avg, 1)
+        delta_pct = round(((current - avg) / avg * 100.0), 1) if avg > 0 else 0.0
+        if avg > 0 and current > avg * 1.2:
+            sites_over_consumption.append({
+                'id': site.id,
+                'name': site.nom_site,
+                'current': round(current, 1),
+                'average': round(avg, 1),
+                'delta': delta,
+                'delta_pct': delta_pct,
+            })
+
+    group_rows = []
+    groups_over_hourly_threshold = []
+    for g_id in group_ids:
+        meta = timeseries['groupe_meta'][g_id]
+        hours_series = hours_by_groupe[g_id]
+        consumption_series = consumption_by_groupe[g_id]
+        current_hours = float(hours_series[-1]) if hours_series else 0.0
+        current_consumption = float(consumption_series[-1]) if consumption_series else 0.0
+        hourly_current = round(current_consumption / current_hours, 1) if current_hours > 0 else 0.0
+        hourly_history = []
+        for idx in range(len(hours_series)):
+            hours_val = float(hours_series[idx])
+            consumption_val = float(consumption_series[idx])
+            if hours_val > 0:
+                hourly_history.append(consumption_val / hours_val)
+        avg_hourly = sum(hourly_history) / len(hourly_history) if hourly_history else 0.0
+        deviation_pct = ((hourly_current - avg_hourly) / avg_hourly * 100.0) if avg_hourly > 0 else 0.0
+        group_rows.append({
+            'id': g_id,
+            'label': meta['label'],
+            'site_id': meta['site_id'],
+            'site_name': meta['site_nom'],
+            'current_hours': round(current_hours, 1),
+            'current_consumption': round(current_consumption, 1),
+            'hourly_current': round(hourly_current, 1),
+            'avg_hourly': round(avg_hourly, 1),
+            'deviation_pct': round(deviation_pct, 1),
+            'is_over_threshold': avg_hourly > 0 and hourly_current > avg_hourly * 1.2,
+        })
+
+    groups_over_hourly_threshold = [row for row in group_rows if row['is_over_threshold']]
+
+    for row in sites_below_threshold:
+        site_alerts.append({
+            'priority': 1,
+            'title': 'Stock critique',
+            'message': f"{row['name']} est sous le seuil de stock ({row['pct']:.1f} %).",
+            'url': f"/groupes/?site_id={row['id']}",
+        })
+    for row in sites_over_consumption:
+        site_alerts.append({
+            'priority': 2,
+            'title': 'Consommation excessive',
+            'message': f"{row['name']} dépasse sa moyenne de consommation ({row['current']:.1f} L contre {row['average']:.1f} L).",
+            'url': f"/groupes/?site_id={row['id']}",
+        })
+    for row in groups_over_hourly_threshold:
+        site_alerts.append({
+            'priority': 2,
+            'title': 'Groupe en surconsommation',
+            'message': f"{row['label']} consomme {row['hourly_current']:.1f} L/h contre {row['avg_hourly']:.1f} L/h en moyenne.",
+            'url': f"/groupes/?site_id={row['site_id']}",
+        })
+    if current_week_hours > 0 and abs(weekly_hours_gap_pct) > 10:
+        site_alerts.append({
+            'priority': 3,
+            'title': 'Durée de fonctionnement anormale',
+            'message': f"La semaine courante atteint {current_week_hours:.1f} h, soit {weekly_hours_gap_pct:.1f} % par rapport à la moyenne.",
+            'url': '/groupes/',
+        })
+    if current_week_consumption > 0 and abs(weekly_consumption_gap_pct) > 10:
+        site_alerts.append({
+            'priority': 3,
+            'title': 'Consommation hebdo anormale',
+            'message': f"Consommation hebdo à {current_week_consumption:.1f} L, soit {weekly_consumption_gap_pct:.1f} % par rapport à la moyenne.",
+            'url': '/groupes/',
+        })
+
+    site_alerts.sort(key=lambda item: item['priority'])
+
+    return {
+        'latest_rapport': latest_rapport,
+        'sites_below_threshold': sites_below_threshold,
+        'sites_over_consumption': sites_over_consumption,
+        'groups_over_hourly_threshold': groups_over_hourly_threshold,
+        'weekly_hours': round(current_week_hours, 1),
+        'weekly_hours_gap_pct': round(weekly_hours_gap_pct, 1),
+        'weekly_consumption': round(current_week_consumption, 1),
+        'weekly_consumption_gap_pct': round(weekly_consumption_gap_pct, 1),
+        'alerts': site_alerts,
+        'site_rows': site_rows,
+    }
 
 
 def get_etat_cuves_context(selected_site_id=None):
@@ -488,53 +655,6 @@ def get_consommation_context():
         'consommation_latest_total': latest_total,
         'consommation_summary': latest_summary,
     }
-
-
-def dashboard_index_view(request):
-    """Vue principale du Dashboard Général."""
-    site_id = request.GET.get('site_id')
-    context = get_etat_cuves_context(selected_site_id=site_id)
-    context.update(get_evolution_volumes_context())
-    context.update(get_horaires_groupes_context())
-    context.update(get_consommation_context())
-    return render(request, 'dashboard/index.html', context)
-
-
-def etat_cuves_component_view(request):
-    """Vue composant isolée pour la métrique 1."""
-    site_id = request.GET.get('site_id')
-    context = get_etat_cuves_context(selected_site_id=site_id)
-    return render(request, 'dashboard/components/etat_cuves.html', context)
-
-
-def evolution_volumes_component_view(request):
-    """Vue composant isolée pour la métrique 2."""
-    context = get_evolution_volumes_context()
-    return render(request, 'dashboard/components/evolution_volumes.html', context)
-
-
-def horaires_groupes_component_view(request):
-    """Vue composant isolée pour la métrique 3 : Horaires de fonctionnement des groupes."""
-    context = get_horaires_groupes_context()
-    return render(request, 'dashboard/components/horaires_groupes.html', context)
-
-
-def consommation_component_view(request):
-    """Vue composant isolée pour la métrique 4 : Consommation totale de carburant."""
-    context = get_consommation_context()
-    return render(request, 'dashboard/components/consommation_carburant.html', context)
-
-
-def groupes_dashboard_view(request):
-    """Page dédiée aux groupes électrogènes avec filtres période et site."""
-    from dashboard.analytics import get_groupes_page_context
-
-    context = get_groupes_page_context(
-        rapport_debut_id=request.GET.get('rapport_debut'),
-        rapport_fin_id=request.GET.get('rapport_fin'),
-        site_id=request.GET.get('site_id'),
-    )
-    return render(request, 'dashboard/groupes.html', context)
 
 
 class EtatCuvesAPIView(APIView):

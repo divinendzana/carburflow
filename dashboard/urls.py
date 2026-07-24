@@ -6,12 +6,6 @@ from drf_spectacular.views import (
     SpectacularRedocView,
 )
 from dashboard.views import (
-    dashboard_index_view,
-    etat_cuves_component_view,
-    evolution_volumes_component_view,
-    horaires_groupes_component_view,
-    consommation_component_view,
-    groupes_dashboard_view,
     EtatCuvesAPIView,
     CuvesDashboardAPIView,
     EvolutionVolumesAPIView,
@@ -35,14 +29,6 @@ router.register(r'rapports', RapportViewSet, basename='rapport')
 router.register(r'lignes_rapport', LigneRapportViewSet, basename='lignerapport')
 
 urlpatterns = [
-    # Vue Dashboard HTML Principale & composants
-    path('', dashboard_index_view, name='dashboard-index'),
-    path('groupes/', groupes_dashboard_view, name='groupes-dashboard'),
-    path('component/etat-cuves/', etat_cuves_component_view, name='component-etat-cuves'),
-    path('component/evolution-volumes/', evolution_volumes_component_view, name='component-evolution-volumes'),
-    path('component/horaires-groupes/', horaires_groupes_component_view, name='component-horaires-groupes'),
-    path('component/consommation/', consommation_component_view, name='component-consommation'),
-
     # Analytics Dashboard API Endpoints
     path('dashboard/etat_cuves', EtatCuvesAPIView.as_view(), name='api-dashboard-etat-cuves'),
     path('dashboard/evolution_volumes', EvolutionVolumesAPIView.as_view(), name='api-dashboard-evolution-volumes'),
