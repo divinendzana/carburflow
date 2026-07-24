@@ -1,116 +1,66 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
-import MetricPanel from '../components/MetricPanel.jsx'
 
 const fallbackDashboardData = {
-  metric1: {
-    labels: ['CP #1 (BUF Bepanda)', 'CP #2 (BUF Bonaberi)', 'CP #3 (BUF Yaounde)'],
-    values: [62, 40, 55],
-    quantities: [2400, 1800, 2100],
-    dailySeries: {
-      1: {
-        labels: ['CJ #1', 'CJ #2', 'CJ #3'],
-        percentages: [72, 88, 80],
-        colors: ['#0b3d7a', '#3b82f6', '#60a5fa'],
-      },
-    },
+  summary: {
+    critical_autonomy_sites: 1,
+    abnormal_consumption_groups: 1,
+    total_consumption: 3200,
+    total_runtime: 180,
   },
-  metric2: {
-    labels: ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jui'],
-    globalConsumption: [380, 420, 460, 490, 520, 570],
-    siteSeries: [
-      { label: 'BUF Bepanda', data: [130, 150, 170, 180, 190, 220], borderColor: '#0b3d7a', backgroundColor: '#0b3d7a22' },
-      { label: 'BUF Bonaberi', data: [115, 130, 145, 150, 160, 175], borderColor: '#3b82f6', backgroundColor: '#3b82f622' },
-      { label: 'BUF Yaounde', data: [135, 140, 145, 160, 170, 175], borderColor: '#60a5fa', backgroundColor: '#60a5fa22' },
-    ],
-  },
-  metric3: {
-    labels: ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jui'],
-    globalHours: [42, 48, 54, 61, 58, 66],
-    sitesData: {
-      1: {
-        nom_site: 'BUF Bepanda',
-        datasets: [
-          { label: 'G#1 (Group 1)', data: [18, 21, 22, 24, 23, 26], borderColor: '#0b3d7a', backgroundColor: '#0b3d7a22' },
-          { label: 'G#2 (Group 2)', data: [12, 13, 15, 17, 16, 18], borderColor: '#3b82f6', backgroundColor: '#3b82f622' },
-        ],
-      },
-    },
-  },
-  metric4: {
-    labels: ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jui'],
-    globalVolumes: [1800, 2100, 2050, 2350, 2600, 2820],
-    siteSeries: [
-      { label: 'BUF Bepanda', data: [700, 780, 760, 850, 920, 1000], borderColor: '#0b3d7a', backgroundColor: '#0b3d7a22' },
-      { label: 'BUF Bonaberi', data: [560, 620, 610, 720, 760, 820], borderColor: '#3b82f6', backgroundColor: '#3b82f622' },
-      { label: 'BUF Yaounde', data: [540, 700, 680, 780, 920, 1000], borderColor: '#60a5fa', backgroundColor: '#60a5fa22' },
-    ],
-  },
+  sites: [
+    { id: 1, site_name: 'BUF Bepanda', label: 'BUF Bepanda', avg_consumption: 180, latest_consumption: 180, latest_volume: 340, autonomy: 1.9 },
+    { id: 2, site_name: 'BUF Bonaberi', label: 'BUF Bonaberi', avg_consumption: 150, latest_consumption: 150, latest_volume: 420, autonomy: 2.8 },
+  ],
+  groups: [
+    { id: 10, label: 'G#10 (Group A)', site_name: 'BUF Bepanda', avg_consumption: 90, latest_consumption: 96, avg_hours: 24, latest_hours: 26, variance_pct: 18, autonomy: 2.1 },
+    { id: 11, label: 'G#11 (Group B)', site_name: 'BUF Bonaberi', avg_consumption: 72, latest_consumption: 74, avg_hours: 20, latest_hours: 22, variance_pct: 10, autonomy: 3.2 },
+  ],
+  alerts: [],
 }
 
 function DashboardPage({ onNavigate }) {
-  const chartPalette = useMemo(() => ({
-    axis: '#123d6d',
-    grid: 'rgba(11, 61, 122, 0.08)',
-    text: '#23466d',
-  }), [])
   const [dashboardData, setDashboardData] = useState(null)
-  const [periodStart, setPeriodStart] = useState(0)
-  const [periodEnd, setPeriodEnd] = useState(0)
-
-  const sliceRange = (items = []) => {
-    if (!items.length) return []
-    const start = Math.min(periodStart, periodEnd)
-    const end = Math.max(periodStart, periodEnd)
-    return items.slice(start, end + 1)
-  }
-
-  const average = (values = []) => {
-    const numeric = (values || []).filter((value) => typeof value === 'number')
-    if (!numeric.length) return 0
-    return numeric.reduce((sum, value) => sum + value, 0) / numeric.length
-  }
 
   const formatValue = (value, suffix = '') => {
     if (value == null || Number.isNaN(value)) return '—'
     return `${Number(value).toLocaleString('fr-FR')}${suffix}`
   }
 
+  const average = (values = []) => {
+    const numeric = (values || []).filter((value) => typeof value === 'number' && !Number.isNaN(value))
+    if (!numeric.length) return 0
+    return numeric.reduce((sum, value) => sum + value, 0) / numeric.length
+  }
+
+  const getDeviation = (value, reference) => {
+    if (value == null || reference == null || reference === 0) return null
+    return Number((((value - reference) / reference) * 100).toFixed(1))
+  }
+
+  const renderDeviation = (value, reference, fallback = '—') => {
+    const deviation = getDeviation(value, reference)
+    if (deviation == null) return fallback
+
+    const positive = deviation >= 0
+    return (
+      <span className={`deviation-cell ${positive ? 'positive' : 'negative'}`}>
+        {positive ? '▲' : '▼'} {Math.abs(deviation).toFixed(1)}%
+      </span>
+    )
+  }
+
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
-        const [metric1, metric2, metric3, metric4] = await Promise.all([
-          fetch('/api/v1/dashboard/etat_cuves').then((response) => response.json()),
-          fetch('/api/v1/dashboard/evolution_volumes').then((response) => response.json()),
-          fetch('/api/v1/dashboard/horaires_groupes').then((response) => response.json()),
-          fetch('/api/v1/dashboard/consommation').then((response) => response.json()),
-        ])
-
-        setDashboardData({
-          metric1: {
-            labels: metric1.cp_chart_labels,
-            values: metric1.cp_chart_pcts,
-            quantities: metric1.cp_chart_quantities,
-            dailySeries: metric1.sites_cj_chart_data || {},
-          },
-          metric2: {
-            labels: metric4.labels,
-            globalConsumption: metric4.global_consumption,
-            siteSeries: metric4.sites_series,
-          },
-          metric3: {
-            labels: metric3.labels,
-            globalHours: metric3.global_hours,
-            sitesData: metric3.sites_data,
-          },
-          metric4: {
-            labels: metric2.labels,
-            globalVolumes: metric2.global_volumes,
-            siteSeries: metric2.sites_series,
-          },
-        })
+        const response = await fetch('/api/v1/dashboard/overview')
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+        const payload = await response.json()
+        setDashboardData(payload)
       } catch (error) {
-        console.warn('Backend React dashboard unavailable, using demo fallback data.', error)
+        console.warn('Dashboard API unavailable, using fallback data.', error)
         setDashboardData(fallbackDashboardData)
       }
     }
@@ -118,213 +68,153 @@ function DashboardPage({ onNavigate }) {
     loadDashboardData()
   }, [])
 
-  useEffect(() => {
-    if (!dashboardData) return
-    const lastIndex = Math.max((dashboardData.metric2.labels?.length || 1) - 1, 0)
-    setPeriodStart(0)
-    setPeriodEnd(lastIndex)
+  const siteRows = useMemo(() => {
+    if (!dashboardData?.sites?.length) return []
+    return [...dashboardData.sites].map((site) => ({
+      ...site,
+      autonomy: site.autonomy != null ? Number(site.autonomy) : null,
+      avg_consumption: site.avg_consumption != null ? Number(site.avg_consumption) : 0,
+      latest_consumption: site.latest_consumption != null ? Number(site.latest_consumption) : 0,
+      latest_volume: site.latest_volume != null ? Number(site.latest_volume) : 0,
+    }))
   }, [dashboardData])
 
-  const selectedLabels = dashboardData ? sliceRange(dashboardData.metric2.labels) : []
-  const selectedConsumption = dashboardData ? sliceRange(dashboardData.metric2.globalConsumption) : []
-  const selectedHours = dashboardData ? sliceRange(dashboardData.metric3.globalHours) : []
+  const groupRows = useMemo(() => {
+    if (!dashboardData?.groups?.length) return []
+    return [...dashboardData.groups].map((group) => ({
+      ...group,
+      avg_consumption: group.avg_consumption != null ? Number(group.avg_consumption) : 0,
+      latest_consumption: group.latest_consumption != null ? Number(group.latest_consumption) : 0,
+      avg_hours: group.avg_hours != null ? Number(group.avg_hours) : 0,
+      latest_hours: group.latest_hours != null ? Number(group.latest_hours) : 0,
+      variance_pct: group.variance_pct != null ? Number(group.variance_pct) : 0,
+      autonomy: group.autonomy != null ? Number(group.autonomy) : null,
+    }))
+  }, [dashboardData])
 
-  const totalConsumption = selectedConsumption.reduce((sum, value) => sum + (typeof value === 'number' ? value : 0), 0)
-  const totalHours = selectedHours.reduce((sum, value) => sum + (typeof value === 'number' ? value : 0), 0)
+  const siteAverageAutonomy = useMemo(() => average(siteRows.map((site) => site.autonomy).filter((value) => value != null)), [siteRows])
+  const siteAverageConsumption = useMemo(() => average(siteRows.map((site) => site.avg_consumption)), [siteRows])
+  const groupAverageConsumption = useMemo(() => average(groupRows.map((group) => group.avg_consumption)), [groupRows])
+  const groupAverageVariance = useMemo(() => average(groupRows.map((group) => group.variance_pct)), [groupRows])
+  const groupAverageAutonomy = useMemo(() => average(groupRows.map((group) => group.autonomy).filter((value) => value != null)), [groupRows])
 
-  const lastConsumption = selectedConsumption[selectedConsumption.length - 1]
-  const previousConsumption = selectedConsumption[selectedConsumption.length - 2]
-  const lastHours = selectedHours[selectedHours.length - 1]
-  const previousHours = selectedHours[selectedHours.length - 2]
+  const summaryCards = useMemo(() => {
+    if (!dashboardData) return []
 
-  const computeTrend = (current, previous) => {
-    if (current == null || previous == null || previous === 0) return null
-    const value = ((current - previous) / previous) * 100
-    const rounded = Number(value.toFixed(1))
-    return {
-      percent: rounded,
-      positive: rounded >= 0,
-      text: `${rounded > 0 ? '+' : ''}${rounded.toFixed(1)} % par rapport à la semaine passée`,
-    }
-  }
+    const criticalAutonomySites = dashboardData.summary?.critical_autonomy_sites ?? 0
+    const abnormalGroups = dashboardData.summary?.abnormal_consumption_groups ?? 0
+    const totalConsumption = dashboardData.summary?.total_consumption ?? 0
+    const totalRuntime = dashboardData.summary?.total_runtime ?? 0
 
-  const consumptionTrend = computeTrend(lastConsumption, previousConsumption)
-  const hoursTrend = computeTrend(lastHours, previousHours)
+    const criticalReference = Math.max(1, Math.ceil((groupRows.length || 1) * 0.25))
+    const abnormalReference = Math.max(1, Math.ceil((groupRows.length || 1) * 0.25))
+    const consumptionDeviation = getDeviation(totalConsumption, siteAverageConsumption || totalConsumption || 1)
+    const runtimeDeviation = getDeviation(totalRuntime, groupRows.length ? average(groupRows.map((group) => group.latest_hours)) || 1 : totalRuntime || 1)
+    const criticalDeviation = getDeviation(criticalAutonomySites, criticalReference)
+    const abnormalDeviation = getDeviation(abnormalGroups, abnormalReference)
 
-  const siteVolumeMap = new Map((dashboardData?.metric4.siteSeries || []).map((site) => [String(site.id ?? site.label), site]))
-  const siteRows = (dashboardData?.metric2.siteSeries || []).map((site) => {
-    const data = sliceRange(site.data || [])
-    const avg = average(data)
-    const latestConsumption = data[data.length - 1] ?? 0
-    const volumeSite = siteVolumeMap.get(String(site.id ?? site.label))
-    const latestVolume = Array.isArray(volumeSite?.data) ? volumeSite.data[volumeSite.data.length - 1] : null
-    const autonomy = avg > 0 && latestVolume != null ? latestVolume / avg : null
-
-    return {
-      key: String(site.id ?? site.label),
-      label: site.label,
-      avg,
-      latestConsumption,
-      latestVolume,
-      autonomy,
-    }
-  })
-
-  const sortedSitesByConsumption = [...siteRows].sort((a, b) => b.avg - a.avg)
-  const lowAutonomySites = sortedSitesByConsumption.filter((site) => site.autonomy != null && site.autonomy <= 2).slice(0, 5)
-  const siteAverageConsumption = average(siteRows.map((site) => site.avg))
-  const highConsumptionSites = sortedSitesByConsumption.filter((site) => site.avg > siteAverageConsumption * 1.2).slice(0, 5)
-
-  const groupRows = Object.values(dashboardData?.metric3.sitesData || {}).flatMap((site) =>
-    (site.datasets || []).map((dataset) => {
-      const data = sliceRange(dataset.data || [])
-      const avg = average(data)
-      return {
-        key: String(dataset.id ?? dataset.label),
-        label: dataset.label,
-        siteName: site.nom_site || '',
-        avg,
-        latest: data[data.length - 1] ?? 0,
-      }
-    }),
-  )
-
-  const sortedGroupsByHours = [...groupRows].sort((a, b) => b.avg - a.avg)
-  const groupAverageHours = average(groupRows.map((group) => group.avg))
-  const groupDeviations = sortedGroupsByHours.filter((group) => groupAverageHours > 0 && group.avg > groupAverageHours * 1.2).slice(0, 8)
-
-  const computeDeviation = (value, average) => {
-    if (value == null || average == null || average === 0) return null
-    return Number((((value - average) / average) * 100).toFixed(1))
-  }
-
-  const formatAutonomy = (hours) => {
-    if (hours == null || Number.isNaN(hours)) return 'N/D'
-    const hrs = Math.round(hours)
-    if (hrs > 24) {
-      const days = Math.floor(hrs / 24)
-      const rem = hrs % 24
-      return `${days}j:${String(rem).padStart(2, '0')}h`
-    }
-    return `${hrs} h`
-  }
-
-  const topGroupForSite = (siteLabel) => {
-    const groups = groupRows.filter((g) => (g.siteName || '').toLowerCase() === (siteLabel || '').toLowerCase())
-    if (!groups.length) return null
-    return groups.sort((a, b) => b.avg - a.avg)[0].label
-  }
-
-  const alertItems = [
-    ...lowAutonomySites.map((site) => {
-      const deviation = computeDeviation(site.avg, siteAverageConsumption)
-      const topGroup = topGroupForSite(site.label)
-      return {
-        id: `low-autonomy-${site.key}`,
-        title: `Site ${site.label} : autonomie critique`,
-        siteName: site.label,
-        autonomyHours: site.autonomy,
-        autonomyFormatted: formatAutonomy(site.autonomy),
-        topGroup,
-        subtitle: `Consommation ${formatValue(site.avg, ' L')} ${deviation != null ? `(${deviation > 0 ? '+' : ''}${deviation}% vs moyenne)` : ''}.`,
-        target: 'site',
-        priority: 'Critique',
-        priorityLevel: 'urgent',
-        deviation,
-        priorityRank: 3,
-      }
-    }),
-    ...highConsumptionSites.map((site) => {
-      const deviation = computeDeviation(site.avg, siteAverageConsumption)
-      return {
-        id: `high-consumption-${site.key}`,
-        title: `Site ${site.label} : consommation anormale`,
-        siteName: site.label,
-        avg: site.avg,
-        subtitle: `Consommation ${formatValue(site.avg, ' L')} ${deviation != null ? `(${deviation > 0 ? '+' : ''}${deviation}% vs moyenne)` : ''}.`,
-        target: 'site',
-        priority: 'Critique',
-        priorityLevel: 'urgent',
-        deviation,
-        priorityRank: 2,
-      }
-    }),
-    ...groupDeviations.map((group) => {
-      const deviation = computeDeviation(group.avg, groupAverageHours)
-      return {
-        id: `group-anomaly-${group.key}`,
-        title: `Groupe ${group.label} : consommation horaire anormale`,
-        groupLabel: group.label,
-        siteName: group.siteName || '',
-        avg: group.avg,
-        latest: group.latest,
-        subtitle: `Consommation horaire ${formatValue(group.avg, ' h')} ${deviation != null ? `(${deviation > 0 ? '+' : ''}${deviation}% vs moyenne)` : ''}.`,
-        target: 'groups',
-        priority: 'Moyenne',
-        priorityLevel: 'warning',
-        deviation,
-        priorityRank: 1,
-      }
-    }),
-  ].sort((a, b) => (b.priorityRank - a.priorityRank) || ((b.deviation || 0) - (a.deviation || 0)))
-
-  const isCritical = alertItems.length >= 3
-  const summaryCards = isCritical
-    ? [
-        { label: 'Autonomie critique', title: `${lowAutonomySites.length}`, detail: 'Sites avec autonomie estimée faible' },
-        { label: 'Groupes anormaux', title: `${groupDeviations.length}`, detail: 'Groupes à forte déviation horaire' },
-        {
-          label: 'Consommation totale',
-          title: formatValue(totalConsumption, ' L'),
-          detail: 'Dernière période analysée',
-          trend: consumptionTrend,
+    return [
+      {
+        label: 'Autonomie critique',
+        title: `${criticalAutonomySites}`,
+        detail: 'Groupes avec autonomie faible',
+        deviation: {
+          value: criticalDeviation,
+          positive: (criticalDeviation ?? 0) <= 0,
+          text: criticalDeviation == null ? '—' : `${criticalDeviation >= 0 ? '+' : ''}${criticalDeviation.toFixed(1)} % vs seuil`,
         },
-        {
-          label: 'Durée de fonctionnement',
-          title: formatValue(totalHours, ' h'),
-          detail: 'Total des heures groupes',
-          trend: hoursTrend,
+      },
+      {
+        label: 'Groupes anormaux',
+        title: `${abnormalGroups}`,
+        detail: 'Groupes avec consommation anormale',
+        deviation: {
+          value: abnormalDeviation,
+          positive: (abnormalDeviation ?? 0) <= 0,
+          text: abnormalDeviation == null ? '—' : `${abnormalDeviation >= 0 ? '+' : ''}${abnormalDeviation.toFixed(1)} % vs seuil`,
         },
-      ]
-    : [
-        {
-          label: 'Consommation totale',
-          title: formatValue(totalConsumption, ' L'),
-          detail: 'Dernière période analysée',
-          trend: consumptionTrend,
+      },
+      {
+        label: 'Consommation totale',
+        title: formatValue(totalConsumption, ' L'),
+        detail: 'Dernière période analysée',
+        deviation: {
+          value: consumptionDeviation,
+          positive: (consumptionDeviation ?? 0) >= 0,
+          text: consumptionDeviation == null ? '—' : `${consumptionDeviation >= 0 ? '+' : ''}${consumptionDeviation.toFixed(1)} % vs moyenne`,
         },
-        {
-          label: 'Durée de fonctionnement',
-          title: formatValue(totalHours, ' h'),
-          detail: 'Total des heures groupes',
-          trend: hoursTrend,
+      },
+      {
+        label: 'Durée de fonctionnement',
+        title: formatValue(totalRuntime, ' h'),
+        detail: 'Somme des heures de fonctionnement',
+        deviation: {
+          value: runtimeDeviation,
+          positive: (runtimeDeviation ?? 0) >= 0,
+          text: runtimeDeviation == null ? '—' : `${runtimeDeviation >= 0 ? '+' : ''}${runtimeDeviation.toFixed(1)} % vs moyenne`,
         },
-        { label: 'Sites gourmands', title: `${sortedSitesByConsumption.length}`, detail: 'Sites avec fort niveau de consommation' },
-        { label: 'Groupes gourmands', title: `${sortedGroupsByHours.length}`, detail: 'Groupes avec le plus d’heures' },
-      ]
+      },
+    ]
+  }, [dashboardData, groupRows, siteAverageConsumption])
 
-  const primaryTable = isCritical ? highConsumptionSites : sortedSitesByConsumption.slice(0, 8)
-  const primaryTableTitle = isCritical ? 'Sites à consommation anormale' : 'Sites les plus gourmands'
-  const primaryTableHeaders = isCritical
-    ? ['Site', 'Consommation moyenne', 'Dernière consommation', 'Écart relatif']
-    : ['Site', 'Consommation moyenne', 'Dernier volume', 'Autonomie estimée']
+  const primaryRows = useMemo(() => {
+    if (!dashboardData?.sites?.length) return []
+    const rows = dashboardData.sites.map((site) => ({
+      ...site,
+      autonomy: site.autonomy != null ? Number(site.autonomy) : null,
+      avg_consumption: site.avg_consumption != null ? Number(site.avg_consumption) : 0,
+      latest_consumption: site.latest_consumption != null ? Number(site.latest_consumption) : 0,
+      latest_volume: site.latest_volume != null ? Number(site.latest_volume) : 0,
+      group_autonomy: null,
+    }))
 
-  const secondaryTable = isCritical ? lowAutonomySites : sortedGroupsByHours.slice(0, 8)
-  const secondaryTableTitle = isCritical ? 'Site à faible autonomie' : 'Groupes les plus gourmands'
-  const secondaryTableHeaders = isCritical ? ['Site', 'Dernier volume', 'Consommation moyenne', 'Autonomie estimée'] : ['Groupe', 'Site', 'Heures moyennes']
+    const rowsWithGroups = rows.map((site) => {
+      const relatedGroups = groupRows.filter((group) => (group.site_name || '').toLowerCase() === (site.site_name || '').toLowerCase())
+      const avgGroupAutonomy = average(relatedGroups.map((group) => group.autonomy).filter((value) => value != null))
+      return {
+        ...site,
+        group_autonomy: avgGroupAutonomy || site.autonomy,
+      }
+    })
 
-  const tertiaryTable = (groupDeviations && groupDeviations.length > 0)
-    ? groupDeviations
-    : (isCritical ? sortedGroupsByHours.slice(0, 8) : highConsumptionSites)
-  const tertiaryIsGroups = (groupDeviations && groupDeviations.length > 0)
+    return [...rowsWithGroups].sort((a, b) => b.avg_consumption - a.avg_consumption).slice(0, 8)
+  }, [dashboardData, groupRows])
 
-  const tertiaryTableTitle = tertiaryIsGroups
-    ? 'Groupes à consommation anormale'
-    : (isCritical ? 'Groupes consommation anormale' : 'Sites à consommation élevée')
+  const secondaryRows = useMemo(() => {
+    if (!groupRows.length) return []
+    return [...groupRows].sort((a, b) => b.avg_consumption - a.avg_consumption).slice(0, 8)
+  }, [groupRows])
 
-  const tertiaryTableHeaders = tertiaryIsGroups
-    ? ['Groupe', 'Site', 'Consommation moyenne', 'Dernière consommation', 'Écart relatif']
-    : ['Site', 'Consommation moyenne', 'Dernier volume', 'Autonomie estimée']
+  const tertiaryRows = useMemo(() => {
+    if (!groupRows.length) return []
+    return [...groupRows].sort((a, b) => b.variance_pct - a.variance_pct).slice(0, 8)
+  }, [groupRows])
+
+  const alertItems = useMemo(() => {
+    const baseAlerts = [...(dashboardData?.alerts || [])]
+    const enriched = baseAlerts.map((alert) => {
+      if (alert.target === 'site') {
+        const site = dashboardData?.sites?.find((entry) => String(entry.id) === String(alert.site_id))
+        const deviation = site?.autonomy != null ? getDeviation(site.autonomy, siteAverageAutonomy) : null
+        return { ...alert, deviation }
+      }
+
+      if (alert.target === 'groups') {
+        const group = groupRows.find((entry) => String(entry.id) === String(alert.group_id))
+        const deviation = group?.avg_consumption != null ? getDeviation(group.avg_consumption, groupAverageConsumption) : null
+        return { ...alert, deviation }
+      }
+
+      return alert
+    })
+
+    return enriched.sort((a, b) => {
+      const rank = { urgent: 2, warning: 1 }
+      return (rank[b.priority_level] || 0) - (rank[a.priority_level] || 0)
+    })
+  }, [dashboardData, groupRows, siteAverageAutonomy, groupAverageConsumption])
+
+  const alerts = alertItems
 
   if (!dashboardData) {
     return (
@@ -347,10 +237,10 @@ function DashboardPage({ onNavigate }) {
             <article key={card.label} className="metric-panel dashboard-summary-card">
               <div className="summary-card-header">
                 <span className="metric-label">{card.label}</span>
-                {card.trend ? (
-                  <span className={`summary-trend ${card.trend.positive ? 'positive' : 'negative'}`}>
-                    <span className="summary-trend-arrow">{card.trend.positive ? '▲' : '▼'}</span>
-                    {card.trend.text}
+                {card.deviation ? (
+                  <span className={`summary-trend ${card.deviation.positive ? 'positive' : 'negative'}`}>
+                    <span className="summary-trend-arrow">{card.deviation.positive ? '▲' : '▼'}</span>
+                    {card.deviation.text}
                   </span>
                 ) : null}
               </div>
@@ -364,44 +254,28 @@ function DashboardPage({ onNavigate }) {
           <div className="metric-title-row">
             <div>
               <span className="metric-label">Tableau principal</span>
-              <h3>{primaryTableTitle}</h3>
+              <h3>Sites les plus consommateurs</h3>
             </div>
           </div>
           <div className="dashboard-table-scroll">
             <table>
               <thead>
                 <tr>
-                  {primaryTableHeaders.map((header) => <th key={header}>{header}</th>)}
+                  <th>Site</th>
+                  <th>Consommation moyenne</th>
+                  <th>Dernier volume</th>
+                  <th>Autonomie groupe</th>
+                  <th>Écart</th>
                 </tr>
               </thead>
               <tbody>
-                {primaryTable.map((row) => (
-                  <tr key={row.key}>
-                    {isCritical ? (
-                      // row is a site with avg and latestConsumption
-                      (() => {
-                        const latest = row.latestConsumption ?? row.latest ?? row.latestVolume ?? null
-                        const dev = computeDeviation(latest, row.avg)
-                        const sign = dev == null ? '' : dev > 0 ? '▲+' : dev < 0 ? '▼' : ''
-                        return (
-                          <>
-                            <td>{row.label}</td>
-                            <td>{formatValue(row.avg, ' L')}</td>
-                            <td>{latest != null ? formatValue(latest, ' L') : '—'}</td>
-                            <td className={`deviation-cell ${dev == null ? '' : (dev >= 0 ? 'positive' : 'negative')}`}>
-                              {dev == null ? '—' : `${sign}${Math.abs(dev)}%`}
-                            </td>
-                          </>
-                        )
-                      })()
-                    ) : (
-                      <>
-                        <td>{row.label}</td>
-                        <td>{formatValue(row.avg, ' L')}</td>
-                        <td>{formatValue(row.latestVolume, ' L')}</td>
-                        <td>{row.autonomy != null ? `${row.autonomy.toFixed(1)} périodes` : '—'}</td>
-                      </>
-                    )}
+                {primaryRows.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.label}</td>
+                    <td>{formatValue(row.avg_consumption, ' L')}</td>
+                    <td>{formatValue(row.latest_volume, ' L')}</td>
+                    <td>{row.group_autonomy != null ? `${row.group_autonomy.toFixed(1)} périodes` : '—'}</td>
+                    <td>{renderDeviation(row.group_autonomy, groupAverageAutonomy, '—')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -413,33 +287,28 @@ function DashboardPage({ onNavigate }) {
           <div className="metric-title-row">
             <div>
               <span className="metric-label">Tableau secondaire</span>
-              <h3>{secondaryTableTitle}</h3>
+              <h3>Groupes les plus consommateurs</h3>
             </div>
           </div>
           <div className="dashboard-table-scroll">
             <table>
               <thead>
                 <tr>
-                  {secondaryTableHeaders.map((header) => <th key={header}>{header}</th>)}
+                  <th>Groupe</th>
+                  <th>Site</th>
+                  <th>Consommation moyenne</th>
+                  <th>Autonomie</th>
+                  <th>Écart</th>
                 </tr>
               </thead>
               <tbody>
-                {secondaryTable.map((row) => (
-                  <tr key={row.key}>
-                    {isCritical ? (
-                      <>
-                        <td>{row.label}</td>
-                        <td>{formatValue(row.latestVolume, ' L')}</td>
-                        <td>{formatValue(row.avg, ' L')}</td>
-                        <td>{row.autonomy != null ? `${row.autonomy.toFixed(1)} périodes` : '—'}</td>
-                      </>
-                    ) : (
-                      <>
-                        <td>{row.label}</td>
-                        <td>{row.siteName || '—'}</td>
-                        <td>{formatValue(row.avg, ' h')}</td>
-                      </>
-                    )}
+                {secondaryRows.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.label}</td>
+                    <td>{row.site_name || '—'}</td>
+                    <td>{formatValue(row.avg_consumption, ' L')}</td>
+                    <td>{row.autonomy != null ? `${row.autonomy.toFixed(1)} périodes` : '—'}</td>
+                    <td>{renderDeviation(row.avg_consumption, groupAverageConsumption, '—')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -451,44 +320,28 @@ function DashboardPage({ onNavigate }) {
           <div className="metric-title-row">
             <div>
               <span className="metric-label">Tableau tertiaire</span>
-              <h3>{tertiaryTableTitle}</h3>
+              <h3>Groupes à forte variance</h3>
             </div>
           </div>
           <div className="dashboard-table-scroll">
             <table>
               <thead>
                 <tr>
-                  {tertiaryTableHeaders.map((header) => <th key={header}>{header}</th>)}
+                  <th>Groupe</th>
+                  <th>Site</th>
+                  <th>Variance</th>
+                  <th>Autonomie</th>
+                  <th>Écart</th>
                 </tr>
               </thead>
               <tbody>
-                {tertiaryTable.map((row) => (
-                  <tr key={row.key}>
-                    {tertiaryIsGroups ? (
-                      (() => {
-                        const latest = row.latest ?? row.latestVolume ?? null
-                        const dev = computeDeviation(latest, row.avg)
-                        const sign = dev == null ? '' : dev > 0 ? '▲+' : dev < 0 ? '▼' : ''
-                        return (
-                          <>
-                            <td>{row.label}</td>
-                            <td>{row.siteName || '—'}</td>
-                            <td>{formatValue(row.avg, ' h')}</td>
-                            <td>{latest != null ? formatValue(latest, ' h') : '—'}</td>
-                            <td className={`deviation-cell ${dev == null ? '' : (dev >= 0 ? 'positive' : 'negative')}`}>
-                              {dev == null ? '—' : `${sign}${Math.abs(dev)}%`}
-                            </td>
-                          </>
-                        )
-                      })()
-                    ) : (
-                      <>
-                        <td>{row.label}</td>
-                        <td>{formatValue(row.avg, ' L')}</td>
-                        <td>{formatValue(row.latestVolume, ' L')}</td>
-                        <td>{row.autonomy != null ? `${row.autonomy.toFixed(1)} périodes` : '—'}</td>
-                      </>
-                    )}
+                {tertiaryRows.map((row) => (
+                  <tr key={row.id}>
+                    <td>{row.label}</td>
+                    <td>{row.site_name || '—'}</td>
+                    <td>{row.variance_pct != null ? `${row.variance_pct.toFixed(1)} %` : '—'}</td>
+                    <td>{row.autonomy != null ? `${row.autonomy.toFixed(1)} périodes` : '—'}</td>
+                    <td>{renderDeviation(row.variance_pct, groupAverageVariance, '—')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -500,52 +353,42 @@ function DashboardPage({ onNavigate }) {
           <div className="metric-title-row">
             <div>
               <span className="metric-label">Notifications d'alertes</span>
-              <h3>{isCritical ? 'Situation critique' : 'Situation normale'}</h3>
+              <h3>{alerts.length ? 'Situation critique' : 'Situation normale'}</h3>
             </div>
           </div>
           <div className="alert-list">
-            {alertItems.length ? alertItems.map((alert) => {
-              const unit = alert.target === 'groups' ? ' h' : ' L'
-              const dev = alert.deviation
-              const avg = alert.avg ?? alert.autonomyHours ?? null
-              const title = alert.siteName ? `Site ${alert.siteName} : Consommation anormale` : (alert.groupLabel ? `Groupe ${alert.groupLabel} : Consommation anormale` : alert.title)
-              return (
-                <div key={alert.id} className={`alert-item alert-${alert.priorityLevel}`}>
-                  <div className="alert-header">
-                    <strong>{title}</strong>
-                    <span className={`alert-badge alert-badge-${alert.priorityLevel}`}>
-                      {alert.priorityLevel === 'urgent' ? (
-                        <svg className="alert-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                          <path d="M12 2L22 20H2L12 2Z" fill="#9B1C1C"/>
-                          <path d="M12 8.5V13" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                          <circle cx="12" cy="16.5" r="1" fill="#FFF"/>
-                        </svg>
-                      ) : (
-                        <svg className="alert-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-                          <path d="M12 2L22 20H2L12 2Z" fill="#A65F03"/>
-                          <path d="M12 8.5V13" stroke="#FFF" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                      )}
-                      <span className="alert-badge-text">{alert.priority}</span>
-                    </span>
-                  </div>
-                  <p>
-                    {dev != null ? (
-                      <>
-                        Un constat de{' '}
-                        <span className={`deviation-inline ${dev >= 0 ? 'positive' : 'negative'}`}>
-                          {dev >= 0 ? '+' : ''}{dev.toLocaleString('fr-FR', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%
-                        </span>{' '}
-                        par rapport à la valeur moyenne de {formatValue(avg, unit)} a été constaté lors du dernier rapport. {' '}
-                      </>
-                    ) : (
-                      'Un constat a été relevé lors du dernier rapport. '
-                    )}
-                    <span className="alert-more" onClick={() => onNavigate && onNavigate({ view: 'sites', siteId: alert.siteName, siteName: alert.siteName })}>En savoir plus</span>
-                  </p>
+            {alerts.length ? alerts.map((alert) => (
+              <div key={alert.id} className={`alert-item alert-${alert.priority_level}`}>
+                <div className="alert-header">
+                  <strong>{alert.title}</strong>
+                  <span className={`alert-badge alert-badge-${alert.priority_level}`}>
+                    <span className="alert-badge-text">{alert.priority}</span>
+                  </span>
                 </div>
-              )
-            }) : (
+                <p>
+                  {alert.deviation != null ? (
+                    <>
+                      <span className={`deviation-inline ${alert.deviation >= 0 ? 'positive' : 'negative'}`}>
+                        {alert.deviation >= 0 ? '▲' : '▼'} {Math.abs(alert.deviation).toFixed(1)}%
+                      </span>{' '}
+                    </>
+                  ) : null}
+                  {alert.subtitle}{' '}
+                  {alert.report_label ? `Rapport concerné : ${alert.report_label}.` : ''}{' '}
+                  <span
+                    className="alert-more"
+                    onClick={() => {
+                      if (!onNavigate) return
+                      if (alert.target === 'groups') {
+                        onNavigate({ view: 'groups', groupId: alert.group_id, groupLabel: alert.group_label })
+                      } else {
+                        onNavigate({ view: 'sites', siteId: alert.site_id, siteName: alert.site_name })
+                      }
+                    }}
+                  >En savoir plus</span>
+                </p>
+              </div>
+            )) : (
               <div className="alert-empty">Aucune alerte majeure détectée pour le moment.</div>
             )}
           </div>

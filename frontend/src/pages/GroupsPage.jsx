@@ -63,6 +63,10 @@ function GroupsPage({ onNavigate }) {
   const [rapportDebut, setRapportDebut] = useState('')
   const [rapportFin, setRapportFin] = useState('')
   const [siteId, setSiteId] = useState('')
+  const queryGroupId = useMemo(() => new URLSearchParams(window.location.search).get('groupId'), [])
+  const queryGroupLabel = useMemo(() => new URLSearchParams(window.location.search).get('groupLabel'), [])
+  const queryMode = useMemo(() => new URLSearchParams(window.location.search).get('mode'), [])
+  const [mode, setMode] = useState(queryMode || 'details')
 
   const reportChoices = useMemo(() => (groupsData?.rapport_choices || groupsData?.report_choices || []), [groupsData])
   const rapportDebutIndex = useMemo(() => {
@@ -82,7 +86,7 @@ function GroupsPage({ onNavigate }) {
 
   const safeValue = (value) => (typeof value === 'number' ? value : 0)
 
-  const loadGroupsData = async (queryParams = '') => {
+  const loadGroupsData = async (queryParams = '', options = {}) => {
     try {
       const response = await fetch(`/api/v1/dashboard/groupes${queryParams ? `?${queryParams}` : ''}`)
       if (!response.ok) {
@@ -90,10 +94,24 @@ function GroupsPage({ onNavigate }) {
       }
       const data = await response.json()
       const choices = data.rapport_choices || data.report_choices || []
-      setGroupsData(data)
+      const normalizedBlocks = (data.group_blocks || []).map((block) => ({
+        ...block,
+        hours: buildDerivedMetric(block.hours_run || []),
+        consumption_stats: buildDerivedMetric(block.consumption || block.consommation || []),
+        volume_stats: buildDerivedMetric(block.volume || []),
+        rate: block.mean_hourly_consumption != null ? block.mean_hourly_consumption : null,
+        autonomie_hours: block.hours_run?.length ? (block.hours_run.reduce((sum, value) => sum + (Number(value) || 0), 0) || 0) : 0,
+      }))
+
+      setGroupsData({
+        ...data,
+        group_blocks: normalizedBlocks,
+      })
       setRapportDebut(data.selected_rapport_debut != null ? String(data.selected_rapport_debut) : String(choices[0]?.id ?? ''))
       setRapportFin(data.selected_rapport_fin != null ? String(data.selected_rapport_fin) : String(choices[choices.length - 1]?.id ?? ''))
-      setSiteId(data.selected_site_id != null ? String(data.selected_site_id) : String(data.sites?.[0]?.id ?? ''))
+      if (!options.preserveSiteSelection) {
+        setSiteId(data.selected_site_id != null ? String(data.selected_site_id) : '')
+      }
     } catch (error) {
       console.warn('Groups backend unavailable, using demo fallback data.', error)
     }
@@ -150,14 +168,38 @@ function GroupsPage({ onNavigate }) {
     return () => charts.forEach((chart) => chart.destroy())
   }, [chartPalette, groupsData, startIndex, endIndex])
 
-  const selectedSite = groupsData?.sites?.find((site) => String(site.id) === String(siteId)) ?? groupsData?.sites?.[0]
-
-  const applyFilters = async (event) => {
-    event.preventDefault()
+  useEffect(() => {
+    if (!groupsData) return
     const params = new URLSearchParams()
     if (rapportDebut) params.set('rapport_debut', rapportDebut)
     if (rapportFin) params.set('rapport_fin', rapportFin)
     if (siteId) params.set('site_id', siteId)
+    if (mode) params.set('mode', mode)
+
+    loadGroupsData(params.toString(), { preserveSiteSelection: true })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rapportDebut, rapportFin, siteId, mode])
+
+  const selectedSite = groupsData?.sites?.find((site) => String(site.id) === String(siteId)) ?? groupsData?.sites?.[0]
+
+  const siteHours = useMemo(() => {
+    const filtered = (groupsData?.group_blocks || []).filter((block) => !siteId || String(block.site_id) === String(siteId))
+    const values = filtered.flatMap((block) => block.hours_run || [])
+    return buildDerivedMetric(values)
+  }, [groupsData, siteId])
+
+  const siteConsumption = useMemo(() => {
+    const filtered = (groupsData?.group_blocks || []).filter((block) => !siteId || String(block.site_id) === String(siteId))
+    const values = filtered.flatMap((block) => block.consumption || [])
+    return buildDerivedMetric(values)
+  }, [groupsData, siteId])
+
+  const applyFilters = async (event) => {
+    const params = new URLSearchParams()
+    if (rapportDebut) params.set('rapport_debut', rapportDebut)
+    if (rapportFin) params.set('rapport_fin', rapportFin)
+    if (siteId) params.set('site_id', siteId)
+    if (mode) params.set('mode', mode)
     await loadGroupsData(params.toString())
   }
 
@@ -172,15 +214,12 @@ function GroupsPage({ onNavigate }) {
     )
   }
 
-  const siteHours = groupsData.site_hours || {}
-  const siteConsumption = groupsData.site_consumption || {}
-
   return (
     <div className="app-shell dashboard-shell">
       <Topbar activeView="groups" onNavigate={onNavigate} />
 
       <main className="groups-grid">
-        <form className="groups-filter-bar" onSubmit={applyFilters}>
+        <div className="groups-filter-bar">
           <div className="filter-field">
             <label htmlFor="rapport_debut">Rapport début</label>
             <select id="rapport_debut" value={rapportDebut} onChange={(event) => setRapportDebut(event.target.value)}>
@@ -200,45 +239,93 @@ function GroupsPage({ onNavigate }) {
           <div className="filter-field">
             <label htmlFor="site_id">Site</label>
             <select id="site_id" value={siteId} onChange={(event) => setSiteId(event.target.value)}>
+              <option value="">Tous</option>
               {(groupsData.sites || []).map((site) => (
                 <option key={site.id} value={String(site.id)}>{site.nom_site}</option>
               ))}
             </select>
           </div>
-          <button type="submit" className="filter-submit">Appliquer</button>
-        </form>
+          <div className="filter-field">
+            <label htmlFor="view_mode">Vue</label>
+            <select id="view_mode" value={mode} onChange={(event) => setMode(event.target.value)}>
+              <option value="details">Détails</option>
+              <option value="all">Global</option>
+            </select>
+          </div>
+        </div>
 
-        <section className="metric-section">
-          <div className="section-title-wrap">
-            <span className="metric-label">Métriques globales</span>
-            <h2>{selectedSite?.nom_site || 'Site'}</h2>
-          </div>
-          <div className="summary-strip">
-            <div className="summary-chip">
-              <span>Durée de fonctionnement sur la période</span>
-              <strong>{siteHours.total?.toFixed(1) ?? '—'} h</strong>
-              {renderDelta(siteHours)}
+        {(mode !== 'all' && siteId) && (
+          <section className="metric-section">
+            <div className="section-title-wrap">
+              <span className="metric-label">Métriques globales</span>
+              <h2>{selectedSite?.nom_site || 'Site'}</h2>
             </div>
-            <div className="summary-chip">
-              <span>Durée de fonctionnement moyenne sur la période</span>
-              <strong>{siteHours.mean?.toFixed(1) ?? '—'} h</strong>
-              {renderMeanDelta(siteHours)}
+            <div className="summary-strip">
+              <div className="summary-chip">
+                <span>Durée de fonctionnement sur la période</span>
+                <strong>{siteHours.total?.toFixed(1) ?? '—'} h</strong>
+                {renderDelta(siteHours)}
+              </div>
+              <div className="summary-chip">
+                <span>Durée de fonctionnement moyenne sur la période</span>
+                <strong>{siteHours.mean?.toFixed(1) ?? '—'} h</strong>
+                {renderMeanDelta(siteHours)}
+              </div>
+              <div className="summary-chip">
+                <span>Variation consommation sur la période</span>
+                <strong>{siteConsumption.total?.toFixed(1) ?? '—'} L</strong>
+                {renderDelta(siteConsumption)}
+              </div>
+              <div className="summary-chip">
+                <span>Variation consommation moyenne sur la période</span>
+                <strong>{siteConsumption.mean?.toFixed(1) ?? '—'} L</strong>
+                {renderMeanDelta(siteConsumption)}
+              </div>
             </div>
-            <div className="summary-chip">
-              <span>Variation consommation sur la période</span>
-              <strong>{siteConsumption.total?.toFixed(1) ?? '—'} L</strong>
-              {renderDelta(siteConsumption)}
-            </div>
-            <div className="summary-chip">
-              <span>Variation consommation moyenne sur la période</span>
-              <strong>{siteConsumption.mean?.toFixed(1) ?? '—'} L</strong>
-              {renderMeanDelta(siteConsumption)}
-            </div>
-          </div>
-        </section>
+          </section>
+        )}
 
         <section className="groups-list">
-          {groupsData.group_blocks?.map((group) => (
+          {mode === 'all' ? (
+            <section className="site-overview">
+              <div className="section-title-wrap">
+                <span className="metric-label">Vue générale</span>
+                <h2>Tous les groupes</h2>
+              </div>
+              <div className="dashboard-table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Groupe</th>
+                      <th>Site</th>
+                      <th>Heures moy.</th>
+                      <th>Conso moy. (L)</th>
+                      <th>Autonomie</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(groupsData.group_blocks || []).map((g) => {
+                      const siteName = g.site_nom || g.nom_site || g.site_name || (groupsData.sites || []).find((s) => String(s.id) === String(g.site_id))?.nom_site || ''
+                      return (
+                        <tr key={g.id}>
+                          <td>{g.label}</td>
+                          <td>{siteName}</td>
+                          <td>{g.hours?.mean?.toFixed(1) ?? '—'}</td>
+                          <td>{g.consumption_stats?.mean?.toFixed(1) ?? '—'}</td>
+                          <td>{g.autonomie_hours != null ? `${g.autonomie_hours.toFixed(1)} h` : '—'}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          ) : (
+            (groupsData.group_blocks || []).filter((group) => {
+              if (queryGroupId) return String(group.id) === String(queryGroupId)
+              if (queryGroupLabel) return String(group.label) === String(queryGroupLabel)
+              return true
+            }).map((group) => (
             <article key={group.id} className="group-card" style={{ position: 'relative', borderLeft: `4px solid ${group.color || '#0b3d7a'}` }}>
               <div style={{ position: 'absolute', top: '1rem', right: '1rem', backgroundColor: '#fde047', color: '#0b3d91', padding: '0.6rem 0.9rem', borderRadius: '999px', fontWeight: 700, boxShadow: '0 12px 20px rgba(0,0,0,0.08)', zIndex: 1 }}>
                 Autonomie {group.autonomie_hours != null ? `${group.autonomie_hours.toFixed(1)} h` : '—'}
@@ -246,6 +333,9 @@ function GroupsPage({ onNavigate }) {
               <div className="group-card-head">
                 <span className="metric-label">Groupe</span>
                 <h3>{group.label}</h3>
+                { (group.site_nom || selectedSite?.nom_site) ? (
+                  <p className="group-header-meta">{group.site_nom || selectedSite?.nom_site}</p>
+                ) : null }
                 <p className="group-header-meta">{group.rate?.toFixed(1) ?? '—'} L/h — {group.marque || ''} {group.puissance || ''}</p>
               </div>
 
@@ -374,7 +464,8 @@ function GroupsPage({ onNavigate }) {
                 </div>
               </div>
             </article>
-          ))}
+            )))
+          }
         </section>
       </main>
     </div>

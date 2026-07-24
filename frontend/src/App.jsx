@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from 'react'
-import PresentationPage from './pages/PresentationPage.jsx'
+import HomePage from './pages/HomePage.jsx'
 import DashboardPage from './pages/DashboardPage.jsx'
 import SitesPage from './pages/SitesPage.jsx'
 import CuvesPage from './pages/CuvesPage.jsx'
 import GroupsPage from './pages/GroupsPage.jsx'
 
 function App() {
-  const [view, setView] = useState('presentation')
+  const [view, setView] = useState('home')
 
   const navigate = (nextView, options = {}) => {
     if (typeof nextView === 'object' && nextView !== null) {
@@ -15,7 +15,7 @@ function App() {
     }
 
     const pathMap = {
-      presentation: '/',
+      home: '/',
       dashboard: '/dashboard/',
       sites: '/sites/',
       cuves: '/cuves/',
@@ -23,7 +23,7 @@ function App() {
     }
 
     if (!nextView) {
-      nextView = 'presentation'
+      nextView = 'home'
     }
 
     let nextPath = pathMap[nextView] || '/'
@@ -34,6 +34,21 @@ function App() {
       }
       if (options.siteName != null && options.siteName !== '') {
         params.push(`siteName=${encodeURIComponent(options.siteName)}`)
+      }
+      if (params.length) {
+        nextPath += `?${params.join('&')}`
+      }
+    }
+    if (nextView === 'groups') {
+      const params = []
+      if (options.groupId != null && options.groupId !== '') {
+        params.push(`groupId=${encodeURIComponent(options.groupId)}`)
+      }
+      if (options.groupLabel != null && options.groupLabel !== '') {
+        params.push(`groupLabel=${encodeURIComponent(options.groupLabel)}`)
+      }
+      if (options.mode != null && options.mode !== '') {
+        params.push(`mode=${encodeURIComponent(options.mode)}`)
       }
       if (params.length) {
         nextPath += `?${params.join('&')}`
@@ -63,7 +78,7 @@ function App() {
         setView('dashboard')
         return
       }
-      setView('presentation')
+      setView('home')
     }
 
     syncViewFromLocation()
@@ -73,7 +88,7 @@ function App() {
 
   return (
     <>
-      {view === 'presentation' && <PresentationPage onNavigate={navigate} />}
+      {view === 'home' && <HomePage onNavigate={navigate} />}
       {view === 'dashboard' && <DashboardPage onNavigate={navigate} />}
       {view === 'sites' && <SitesPage onNavigate={navigate} />}
       {view === 'cuves' && <CuvesPage onNavigate={navigate} />}

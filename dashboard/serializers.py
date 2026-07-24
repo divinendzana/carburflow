@@ -1,6 +1,5 @@
 from rest_framework import serializers
 from dashboard.models import (
-    Site,
     CuvePrincipale,
     CuveJournaliere,
     GroupeElectrogene,
@@ -9,40 +8,27 @@ from dashboard.models import (
 )
 
 
-class SiteSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Site
-        fields = ['id', 'nom_site', 'localisation']
-
-
 class CuvePrincipaleSerializer(serializers.ModelSerializer):
     class Meta:
         model = CuvePrincipale
-        fields = ['id', 'site', 'capacite']
+        fields = ['id', 'identifiant', 'capacite']
 
 
 class CuveJournaliereSerializer(serializers.ModelSerializer):
     class Meta:
         model = CuveJournaliere
-        fields = ['id', 'cuve_principale', 'capacite']
+        fields = ['id', 'cuve_principale', 'capacite', 'groupe_electrogene']
 
 
 class GroupeElectrogeneSerializer(serializers.ModelSerializer):
-    cuves_journalieres = serializers.PrimaryKeyRelatedField(
-        queryset=CuveJournaliere.objects.all(),
-        many=True,
-        required=False
-    )
-
     class Meta:
         model = GroupeElectrogene
         fields = [
             'id',
+            'identifiant',
             'compteur_horaire',
-            'consommation_horaire',
             'marque',
             'puissance',
-            'cuves_journalieres',
         ]
 
 
@@ -60,7 +46,7 @@ class LigneRapportSerializer(serializers.ModelSerializer):
             'rapport',
             'cuve_principale',
             'cuve_journaliere',
-            'groupe',
+            'groupe_electrogene',
             'quantite_gasoil_cuve_principale',
             'quantite_gasoil_cuve_journaliere',
             'compteur_horaire',

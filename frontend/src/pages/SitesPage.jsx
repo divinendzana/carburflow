@@ -6,9 +6,11 @@ function SitesPage({ onNavigate }) {
   const [sitesDashboard, setsitesDashboard] = useState(null)
   const [startIdx, setStartIdx] = useState(0)
   const [endIdx, setEndIdx] = useState(0)
-  const [siteId, setSiteId] = useState(null)
+  const [siteId, setSiteId] = useState('')
   const querySiteId = useMemo(() => new URLSearchParams(window.location.search).get('siteId'), [])
   const querySiteName = useMemo(() => new URLSearchParams(window.location.search).get('siteName'), [])
+  const queryMode = useMemo(() => new URLSearchParams(window.location.search).get('mode'), [])
+  const [mode, setMode] = useState(queryMode || 'details')
 
   const safeValue = (value) => (typeof value === 'number' ? value : 0)
 
@@ -80,9 +82,9 @@ function SitesPage({ onNavigate }) {
     const loadSitesData = async () => {
       try {
         const [metric2, metric3, metric4] = await Promise.all([
-          fetch('/api/v1/dashboard/evolution_volumes').then((response) => response.json()),
-          fetch('/api/v1/dashboard/horaires_groupes').then((response) => response.json()),
-          fetch('/api/v1/dashboard/consommation').then((response) => response.json()),
+          fetch('/api/v1/dashboard/volume_sites').then((response) => response.json()),
+          fetch('/api/v1/dashboard/duree_sites').then((response) => response.json()),
+          fetch('/api/v1/dashboard/consommation_sites').then((response) => response.json()),
         ])
 
         setsitesDashboard({
@@ -128,17 +130,15 @@ function SitesPage({ onNavigate }) {
   useEffect(() => {
     if (!sitesDashboard) return
 
-    const fallbackId = String(sitesDashboard.defaultSiteId ?? sitesDashboard.volumeSeries?.[0]?.id ?? '')
-    const selectedId = querySiteId || fallbackId
-    if ((siteId === null || siteId === '') && selectedId) {
-      setSiteId(selectedId)
-    }
-
     if (querySiteId && querySiteName && sitesDashboard) {
       const matchingSite = siteOptions.find((site) => String(site.id) === querySiteId || site.nom_site === querySiteName)
       if (matchingSite) {
         setSiteId(String(matchingSite.id))
       }
+    }
+
+    if (siteId === null) {
+      setSiteId('')
     }
 
     if (sitesDashboard.labels?.length) {
@@ -148,31 +148,66 @@ function SitesPage({ onNavigate }) {
   }, [sitesDashboard, siteId, querySiteId, querySiteName, siteOptions])
 
   const selectedSite = useMemo(() => {
-    if (!sitesDashboard) return null
+    if (!sitesDashboard || mode === 'all' || !siteId) return null
     return [...(sitesDashboard.volumeSeries || []), ...(sitesDashboard.consumptionSeries || []), ...(sitesDashboard.hoursSeries || [])].find((entry) => String(entry.id) === String(siteId)) || null
-  }, [sitesDashboard, siteId])
+  }, [sitesDashboard, siteId, mode])
+
+  const aggregateSeries = (series = []) => {
+    if (!series.length) return []
+    const maxLength = Math.max(...series.map((entry) => (entry?.data || []).length))
+    return Array.from({ length: maxLength }, (_, index) => {
+      return series.reduce((sum, entry) => sum + Number(entry?.data?.[index] ?? 0), 0)
+    })
+  }
 
   const siteVolumeData = useMemo(() => {
-    if (!selectedSite || !sitesDashboard?.volumeSeries?.length) return []
-    return sitesDashboard.volumeSeries.find((entry) => String(entry.id) === String(selectedSite.id))?.data || []
-  }, [selectedSite, sitesDashboard])
+    if (!sitesDashboard?.volumeSeries?.length) return []
+    if (mode === 'all' || !siteId) return aggregateSeries(sitesDashboard.volumeSeries)
+    return sitesDashboard.volumeSeries.find((entry) => String(entry.id) === String(selectedSite?.id))?.data || []
+  }, [selectedSite, sitesDashboard, siteId, mode])
 
   const siteConsumptionData = useMemo(() => {
-    if (!selectedSite || !sitesDashboard?.consumptionSeries?.length) return []
-    return sitesDashboard.consumptionSeries.find((entry) => String(entry.id) === String(selectedSite.id))?.data || []
-  }, [selectedSite, sitesDashboard])
+    if (!sitesDashboard?.consumptionSeries?.length) return []
+    if (mode === 'all' || !siteId) return aggregateSeries(sitesDashboard.consumptionSeries)
+    return sitesDashboard.consumptionSeries.find((entry) => String(entry.id) === String(selectedSite?.id))?.data || []
+  }, [selectedSite, sitesDashboard, siteId, mode])
 
   const siteHoursData = useMemo(() => {
-    if (!selectedSite || !sitesDashboard?.hoursSeries?.length) return []
-    return sitesDashboard.hoursSeries.find((entry) => String(entry.id) === String(selectedSite.id))?.datasets.flatMap((dataset) => dataset.data || []) || []
-  }, [selectedSite, sitesDashboard])
+    if (!sitesDashboard?.hoursSeries?.length) return []
+    if (mode === 'all' || !siteId) {
+      return sitesDashboard.hoursSeries.flatMap((entry) => entry?.datasets?.flatMap((dataset) => dataset?.data || []) || [])
+    }
+    return sitesDashboard.hoursSeries.find((entry) => String(entry.id) === String(selectedSite?.id))?.datasets.flatMap((dataset) => dataset.data || []) || []
+  }, [selectedSite, sitesDashboard, siteId, mode])
 
   const siteVolumeStats = windowStats(siteVolumeData, startIdx, endIdx)
   const siteConsumptionStats = windowStats(siteConsumptionData, startIdx, endIdx)
   const siteHoursStats = windowStats(siteHoursData, startIdx, endIdx, { ignoreZeros: true })
 
+  const siteTableRows = useMemo(() => {
+    if (!sitesDashboard?.volumeSeries?.length) return []
+
+    const filteredSites = siteId
+      ? (sitesDashboard.volumeSeries || []).filter((site) => String(site.id) === String(siteId))
+      : (sitesDashboard.volumeSeries || [])
+
+    return filteredSites.map((site) => {
+      const volumeSeries = site?.data || []
+      const consumptionSeries = (sitesDashboard.consumptionSeries || []).find((entry) => String(entry.id) === String(site.id))?.data || []
+      const hoursSeries = (sitesDashboard.hoursSeries || []).find((entry) => String(entry.id) === String(site.id))?.datasets.flatMap((dataset) => dataset.data || []) || []
+
+      return {
+        id: site.id,
+        nom_site: site.nom_site,
+        volume: windowStats(volumeSeries, startIdx, endIdx),
+        consumption: windowStats(consumptionSeries, startIdx, endIdx),
+        hours: windowStats(hoursSeries, startIdx, endIdx, { ignoreZeros: true }),
+      }
+    })
+  }, [sitesDashboard, startIdx, endIdx, siteId])
+
   useEffect(() => {
-    if (!window.Chart || !sitesDashboard || !selectedSite) return undefined
+    if (!window.Chart || !sitesDashboard || mode === 'all' || !selectedSite) return undefined
     const charts = []
     const labels = (sitesDashboard.labels || []).slice(startIdx, endIdx + 1)
     const sliceSeries = (values = []) => values.slice(startIdx, endIdx + 1)
@@ -196,20 +231,12 @@ function SitesPage({ onNavigate }) {
     createLineChart('chart-site-hours', siteHoursData, '#3b82f6', true)
     createLineChart('chart-site-consumption', siteConsumptionData, '#60a5fa', true)
     return () => charts.forEach((chart) => chart.destroy())
-  }, [chartPalette, sitesDashboard, selectedSite, siteVolumeData, siteHoursData, siteConsumptionData, startIdx, endIdx])
-
-  const applyFilters = (event) => {
-    event.preventDefault()
-    const normalizedStart = Math.min(startIdx, endIdx)
-    const normalizedEnd = Math.max(startIdx, endIdx)
-    setStartIdx(normalizedStart)
-    setEndIdx(normalizedEnd)
-  }
+  }, [chartPalette, sitesDashboard, selectedSite, siteVolumeData, siteHoursData, siteConsumptionData, startIdx, endIdx, mode])
 
   if (!sitesDashboard) {
     return (
       <div className="app-shell dashboard-shell">
-        <Topbar activeView="site" onNavigate={onNavigate} />
+        <Topbar activeView="sites" onNavigate={onNavigate} />
         <main className="groups-grid"><div className="loading-state">Chargement des données du site...</div></main>
       </div>
     )
@@ -217,75 +244,123 @@ function SitesPage({ onNavigate }) {
 
   return (
     <div className="app-shell dashboard-shell">
-      <Topbar activeView="site" onNavigate={onNavigate} />
+      <Topbar activeView="sites" onNavigate={onNavigate} />
 
       <main className="groups-grid">
-        <form className="groups-filter-bar" onSubmit={applyFilters}>
+        <div className="groups-filter-bar">
           <div className="filter-field">
             <label htmlFor="site-start">Rapport début</label>
-            <select id="site-start" value={startIdx} onChange={(event) => setStartIdx(Number(event.target.value))}>
-              {sitesDashboard.labels.map((label, index) => (<option key={`${label}-${index}`} value={index}>{label}</option>))}
+            <select id="site-start" value={String(startIdx)} onChange={(event) => setStartIdx(Number(event.target.value))}>
+              {sitesDashboard.labels.map((label, index) => (<option key={`${label}-${index}`} value={String(index)}>{label}</option>))}
             </select>
           </div>
           <div className="filter-field">
             <label htmlFor="site-end">Rapport fin</label>
-            <select id="site-end" value={endIdx} onChange={(event) => setEndIdx(Number(event.target.value))}>
-              {sitesDashboard.labels.map((label, index) => (<option key={`${label}-${index}`} value={index}>{label}</option>))}
+            <select id="site-end" value={String(endIdx)} onChange={(event) => setEndIdx(Number(event.target.value))}>
+              {sitesDashboard.labels.map((label, index) => (<option key={`${label}-${index}`} value={String(index)}>{label}</option>))}
             </select>
           </div>
           <div className="filter-field">
             <label htmlFor="site-select">Site</label>
             <select id="site-select" value={siteId ?? ''} onChange={(event) => setSiteId(event.target.value)}>
+              <option value="">Tous</option>
               {siteOptions.map((site) => (<option key={site.id} value={site.id}>{site.nom_site}</option>))}
             </select>
           </div>
-          <button type="submit" className="filter-submit">Appliquer</button>
-        </form>
-
-        <section className="site-overview">
-          <div className="section-title-wrap">
-            <span className="metric-label">Sites</span>
-            <h2>{selectedSite?.nom_site || 'Sites'}</h2>
+          <div className="filter-field">
+            <label htmlFor="view_mode">Vue</label>
+            <select id="view_mode" value={mode} onChange={(event) => {
+              const nextMode = event.target.value
+              setMode(nextMode)
+            }}>
+              <option value="details">Détails</option>
+              <option value="all">Global</option>
+            </select>
           </div>
+        </div>
 
-          <div className="site-metric-grid">
-            <article className="metric-panel site-metric-card">
-              <span className="metric-label">Durée de fonctionnement</span>
-              <h3>Durée / période</h3>
-              <div className="site-metric-stack">
-                <div><span>Total période</span><strong>{siteHoursStats.total.toFixed(1)} h</strong>{renderDelta(siteHoursStats)}</div>
-                <div><span>Moyenne / semaine</span><strong>{siteHoursStats.mean.toFixed(1)} h</strong>{renderMeanDelta(siteHoursStats)}</div>
-                <div><span>Moy. absolue</span><strong>{siteHoursStats.all_time_mean.toFixed(1)} h</strong></div>
-                <div><span>Écart type absolu</span><strong>{siteHoursStats.all_time_stddev.toFixed(1)} h</strong></div>
-              </div>
-              <div className="chart-box secondary-box"><canvas id="chart-site-hours" /></div>
-            </article>
+        {mode === 'all' ? (
+          <section className="site-overview">
+            <div className="section-title-wrap">
+              <span className="metric-label">Sites</span>
+              <h2>{selectedSite?.nom_site || (siteId ? 'Site sélectionné' : 'Tous les sites')}</h2>
+            </div>
 
-            <article className="metric-panel site-metric-card">
-              <span className="metric-label">Consommation</span>
-              <h3>Carburant / période</h3>
-              <div className="site-metric-stack">
-                <div><span>Total période</span><strong>{siteConsumptionStats.total.toFixed(1)} L</strong>{renderDelta(siteConsumptionStats)}</div>
-                <div><span>Moyenne</span><strong>{siteConsumptionStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteConsumptionStats)}</div>
-                <div><span>Moy. absolue</span><strong>{siteConsumptionStats.all_time_mean.toFixed(1)} L</strong></div>
-                <div><span>Écart type absolu</span><strong>{siteConsumptionStats.all_time_stddev.toFixed(1)} L</strong></div>
-              </div>
-              <div className="chart-box secondary-box"><canvas id="chart-site-consumption" /></div>
-            </article>
+            <div className="dashboard-table-scroll">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Site</th>
+                    <th>Durée période (h)</th>
+                    <th>Moy. durée (h)</th>
+                    <th>Consommation période (L)</th>
+                    <th>Moy. consommation (L)</th>
+                    <th>Volume période (L)</th>
+                    <th>Moy. volume (L)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {siteTableRows.map((site) => (
+                    <tr key={site.id}>
+                      <td>{site.nom_site}</td>
+                      <td>{site.hours.total.toFixed(1)}</td>
+                      <td>{site.hours.mean.toFixed(1)}</td>
+                      <td>{site.consumption.total.toFixed(1)}</td>
+                      <td>{site.consumption.mean.toFixed(1)}</td>
+                      <td>{site.volume.total.toFixed(1)}</td>
+                      <td>{site.volume.mean.toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        ) : (
+          <section className="site-overview">
+            <div className="section-title-wrap">
+              <span className="metric-label">Sites</span>
+              <h2>{selectedSite?.nom_site || 'Tous les sites'}</h2>
+            </div>
 
-            <article className="metric-panel site-metric-card">
-              <span className="metric-label">Volume carburant</span>
-              <h3>Volume total / période</h3>
-              <div className="site-metric-stack">
-                <div><span>Total période</span><strong>{siteVolumeStats.total.toFixed(1)} L</strong>{renderDelta(siteVolumeStats)}</div>
-                <div><span>Moyenne</span><strong>{siteVolumeStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteVolumeStats)}</div>
-                <div><span>Moy. absolue</span><strong>{siteVolumeStats.all_time_mean.toFixed(1)} L</strong></div>
-                <div><span>Écart type absolu</span><strong>{siteVolumeStats.all_time_stddev.toFixed(1)} L</strong></div>
-              </div>
-              <div className="chart-box secondary-box"><canvas id="chart-site-volume" /></div>
-            </article>
-          </div>
-        </section>
+            <div className="site-metric-grid">
+              <article className="metric-panel site-metric-card">
+                <span className="metric-label">Durée de fonctionnement</span>
+                <h3>{selectedSite ? 'Durée / période' : 'Cumul durée / période'}</h3>
+                <div className="site-metric-stack">
+                  <div><span>Total période</span><strong>{siteHoursStats.total.toFixed(1)} h</strong>{renderDelta(siteHoursStats)}</div>
+                  <div><span>Moyenne / semaine</span><strong>{siteHoursStats.mean.toFixed(1)} h</strong>{renderMeanDelta(siteHoursStats)}</div>
+                  <div><span>Moy. absolue</span><strong>{siteHoursStats.all_time_mean.toFixed(1)} h</strong></div>
+                  <div><span>Écart type absolu</span><strong>{siteHoursStats.all_time_stddev.toFixed(1)} h</strong></div>
+                </div>
+                <div className="chart-box secondary-box"><canvas id="chart-site-hours" /></div>
+              </article>
+
+              <article className="metric-panel site-metric-card">
+                <span className="metric-label">Consommation</span>
+                <h3>{selectedSite ? 'Carburant / période' : 'Cumul consommation / période'}</h3>
+                <div className="site-metric-stack">
+                  <div><span>Total période</span><strong>{siteConsumptionStats.total.toFixed(1)} L</strong>{renderDelta(siteConsumptionStats)}</div>
+                  <div><span>Moyenne</span><strong>{siteConsumptionStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteConsumptionStats)}</div>
+                  <div><span>Moy. absolue</span><strong>{siteConsumptionStats.all_time_mean.toFixed(1)} L</strong></div>
+                  <div><span>Écart type absolu</span><strong>{siteConsumptionStats.all_time_stddev.toFixed(1)} L</strong></div>
+                </div>
+                <div className="chart-box secondary-box"><canvas id="chart-site-consumption" /></div>
+              </article>
+
+              <article className="metric-panel site-metric-card">
+                <span className="metric-label">Volume carburant</span>
+                <h3>{selectedSite ? 'Volume total / période' : 'Cumul volume / période'}</h3>
+                <div className="site-metric-stack">
+                  <div><span>Total période</span><strong>{siteVolumeStats.total.toFixed(1)} L</strong>{renderDelta(siteVolumeStats)}</div>
+                  <div><span>Moyenne</span><strong>{siteVolumeStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteVolumeStats)}</div>
+                  <div><span>Moy. absolue</span><strong>{siteVolumeStats.all_time_mean.toFixed(1)} L</strong></div>
+                  <div><span>Écart type absolu</span><strong>{siteVolumeStats.all_time_stddev.toFixed(1)} L</strong></div>
+                </div>
+                <div className="chart-box secondary-box"><canvas id="chart-site-volume" /></div>
+              </article>
+            </div>
+          </section>
+        )}
       </main>
     </div>
   )

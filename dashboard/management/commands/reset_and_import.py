@@ -4,7 +4,6 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand
 
 from dashboard.models import (
-    Site,
     CuvePrincipale,
     CuveJournaliere,
     GroupeElectrogene,
@@ -51,10 +50,9 @@ class Command(BaseCommand):
         GroupeElectrogene.objects.all().delete()
         CuveJournaliere.objects.all().delete()
         CuvePrincipale.objects.all().delete()
-        Site.objects.all().delete()
 
         self.stdout.write(self.style.SUCCESS('✔ Données supprimées'))
 
         self.stdout.write(self.style.NOTICE(f'Importation depuis : {data_dir}'))
-        call_command('import_csv', dir=str(data_dir), stdout=self.stdout, stderr=self.stderr)
-        self.stdout.write(self.style.SUCCESS('🎉 Réinitialisation et importation terminés avec succès !'))
+        call_command('import', dir=str(data_dir), stdout=self.stdout, stderr=self.stderr)
+        self.stdout.write(self.style.SUCCESS('Réinitialisation et importation terminés avec succès !'))

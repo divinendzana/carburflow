@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
 
-function PresentationPage({ onNavigate }) {
+function HomePage({ onNavigate }) {
   const [siteCount, setSiteCount] = useState(null)
   const [groupCount, setGroupCount] = useState(null)
   const [lastReportLabel, setLastReportLabel] = useState('')
@@ -9,28 +9,18 @@ function PresentationPage({ onNavigate }) {
   useEffect(() => {
     const loadOverviewData = async () => {
       try {
-        const [siteResponse, etatCuvesResponse] = await Promise.all([
-          fetch('/api/v1/sites?limit=1'),
-          fetch('/api/v1/dashboard/etat_cuves'),
-        ])
+        const response = await fetch('/api/v1/dashboard/overview')
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
 
-        const siteData = await siteResponse.json()
-        const etatCuvesData = await etatCuvesResponse.json()
+        const overviewData = await response.json()
+        setSiteCount(overviewData.sites?.length ?? 0)
+        setGroupCount(overviewData.groups?.length ?? 0)
 
-        const count = typeof siteData.count === 'number'
-          ? siteData.count
-          : Array.isArray(siteData)
-            ? siteData.length
-            : typeof siteData.results?.length === 'number'
-              ? siteData.results.length
-              : 0
-        setSiteCount(count)
-        setGroupCount(etatCuvesData.groupes_count ?? 0)
-
-        if (etatCuvesData.dernier_rapport?.date_debut && etatCuvesData.dernier_rapport?.date_fin) {
-          setLastReportLabel(`${new Date(etatCuvesData.dernier_rapport.date_debut).toLocaleDateString('fr-FR')} → ${new Date(etatCuvesData.dernier_rapport.date_fin).toLocaleDateString('fr-FR')}`)
-        } else if (etatCuvesData.dernier_rapport?.date_fin) {
-          setLastReportLabel(new Date(etatCuvesData.dernier_rapport.date_fin).toLocaleDateString('fr-FR'))
+        const lastReport = overviewData.reports?.[overviewData.reports.length - 1]
+        if (lastReport?.label) {
+          setLastReportLabel(lastReport.label)
         }
       } catch (error) {
         console.warn('Unable to load presentation overview data', error)
@@ -77,7 +67,7 @@ function PresentationPage({ onNavigate }) {
 
             <div className="hero-actions">
               <button type="button" className="btn-primary" onClick={() => onNavigate('dashboard')}>Voir le dashboard</button>
-              <button type="button" className="btn-ghost" onClick={() => onNavigate('site')}>Parcourir les sites</button>
+              <button type="button" className="btn-ghost" onClick={() => onNavigate('sites')}>Parcourir les sites</button>
             </div>
           </div>
         </section>
@@ -86,4 +76,4 @@ function PresentationPage({ onNavigate }) {
   )
 }
 
-export default PresentationPage
+export default HomePage
