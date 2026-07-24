@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
+import { apiFetch } from '../auth.js'
 
 const fallbackDashboardData = {
   summary: {
@@ -53,11 +54,7 @@ function DashboardPage({ onNavigate }) {
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
-        const response = await fetch('/api/v1/dashboard/overview')
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`)
-        }
-        const payload = await response.json()
+        const payload = await apiFetch('/api/v1/dashboard/overview')
         setDashboardData(payload)
       } catch (error) {
         console.warn('Dashboard API unavailable, using fallback data.', error)
@@ -118,21 +115,11 @@ function DashboardPage({ onNavigate }) {
         label: 'Autonomie critique',
         title: `${criticalAutonomySites}`,
         detail: 'Groupes avec autonomie faible',
-        deviation: {
-          value: criticalDeviation,
-          positive: (criticalDeviation ?? 0) <= 0,
-          text: criticalDeviation == null ? '—' : `${criticalDeviation >= 0 ? '+' : ''}${criticalDeviation.toFixed(1)} % vs seuil`,
-        },
       },
       {
         label: 'Groupes anormaux',
         title: `${abnormalGroups}`,
         detail: 'Groupes avec consommation anormale',
-        deviation: {
-          value: abnormalDeviation,
-          positive: (abnormalDeviation ?? 0) <= 0,
-          text: abnormalDeviation == null ? '—' : `${abnormalDeviation >= 0 ? '+' : ''}${abnormalDeviation.toFixed(1)} % vs seuil`,
-        },
       },
       {
         label: 'Consommation totale',
@@ -157,7 +144,33 @@ function DashboardPage({ onNavigate }) {
     ]
   }, [dashboardData, groupRows, siteAverageConsumption])
 
-  const primaryRows = useMemo(() => {
+  // 1. Groupes à faible autonomie
+  const lowAutonomyGroupRows = useMemo(() => {
+    if (!groupRows.length) return []
+    return [...groupRows]
+      .filter((g) => g.autonomy != null)
+      .sort((a, b) => (a.autonomy ?? 999) - (b.autonomy ?? 999))
+      .slice(0, 6)
+  }, [groupRows])
+
+  // 2. Groupes à consommation anormale
+  const abnormalGroupRows = useMemo(() => {
+    if (!groupRows.length) return []
+    return [...groupRows]
+      .sort((a, b) => b.variance_pct - a.variance_pct)
+      .slice(0, 6)
+  }, [groupRows])
+
+  // 3. Groupes les plus gourmands
+  const topConsumerGroupRows = useMemo(() => {
+    if (!groupRows.length) return []
+    return [...groupRows]
+      .sort((a, b) => b.avg_consumption - a.avg_consumption)
+      .slice(0, 6)
+  }, [groupRows])
+
+  // 4. Sites les plus gourmands
+  const topConsumerSiteRows = useMemo(() => {
     if (!dashboardData?.sites?.length) return []
     const rows = dashboardData.sites.map((site) => ({
       ...site,
@@ -177,18 +190,8 @@ function DashboardPage({ onNavigate }) {
       }
     })
 
-    return [...rowsWithGroups].sort((a, b) => b.avg_consumption - a.avg_consumption).slice(0, 8)
+    return [...rowsWithGroups].sort((a, b) => b.avg_consumption - a.avg_consumption).slice(0, 6)
   }, [dashboardData, groupRows])
-
-  const secondaryRows = useMemo(() => {
-    if (!groupRows.length) return []
-    return [...groupRows].sort((a, b) => b.avg_consumption - a.avg_consumption).slice(0, 8)
-  }, [groupRows])
-
-  const tertiaryRows = useMemo(() => {
-    if (!groupRows.length) return []
-    return [...groupRows].sort((a, b) => b.variance_pct - a.variance_pct).slice(0, 8)
-  }, [groupRows])
 
   const alertItems = useMemo(() => {
     const baseAlerts = [...(dashboardData?.alerts || [])]
@@ -216,6 +219,24 @@ function DashboardPage({ onNavigate }) {
 
   const alerts = alertItems
 
+  const renderAlertSubtitle = (subtitle) => {
+    if (!subtitle) return null
+    // Split on the arrow pattern to inject colored JSX spans
+    const parts = subtitle.split(/(▲[\d.]+%|▼[\d.]+%)/)
+    return parts.map((part, i) => {
+      const arrowMatch = part.match(/^(▲|▼)([\d.]+%)$/)
+      if (arrowMatch) {
+        const isUp = arrowMatch[1] === '▲'
+        return (
+          <span key={i} style={{ color: isUp ? '#0f8a4c' : '#bb1f26', fontWeight: 700 }}>
+            {arrowMatch[1]}{arrowMatch[2]}
+          </span>
+        )
+      }
+      return <span key={i}>{part}</span>
+    })
+  }
+
   if (!dashboardData) {
     return (
       <div className="app-shell dashboard-shell">
@@ -231,7 +252,7 @@ function DashboardPage({ onNavigate }) {
     <div className="app-shell dashboard-shell">
       <Topbar activeView="dashboard" onNavigate={onNavigate} />
 
-      <main className="dashboard-grid">
+      <main className="dashboard-grid dashboard-grid-4col">
         <div className="dashboard-summary-grid">
           {summaryCards.map((card) => (
             <article key={card.label} className="metric-panel dashboard-summary-card">
@@ -250,32 +271,31 @@ function DashboardPage({ onNavigate }) {
           ))}
         </div>
 
-        <section className="dashboard-table dashboard-table-large metric-panel">
+        {/* 1. Groupes à faible autonomie */}
+        <section className="dashboard-table metric-panel">
           <div className="metric-title-row">
             <div>
-              <span className="metric-label">Tableau principal</span>
-              <h3>Sites les plus consommateurs</h3>
+              <span className="metric-label">Alertes Autonomie</span>
+              <h3>Groupes à faible autonomie</h3>
             </div>
           </div>
           <div className="dashboard-table-scroll">
             <table>
               <thead>
                 <tr>
-                  <th>Site</th>
-                  <th>Consommation moyenne</th>
-                  <th>Dernier volume</th>
-                  <th>Autonomie groupe</th>
-                  <th>Écart</th>
+                  <th style={{ textAlign: 'left' }}>Groupe</th>
+                  <th style={{ textAlign: 'left' }}>Site</th>
+                  <th style={{ textAlign: 'center' }}>Autonomie</th>
+                  <th style={{ textAlign: 'right' }}>Moy. conso</th>
                 </tr>
               </thead>
               <tbody>
-                {primaryRows.map((row) => (
+                {lowAutonomyGroupRows.map((row) => (
                   <tr key={row.id}>
-                    <td>{row.label}</td>
-                    <td>{formatValue(row.avg_consumption, ' L')}</td>
-                    <td>{formatValue(row.latest_volume, ' L')}</td>
-                    <td>{row.group_autonomy != null ? `${row.group_autonomy.toFixed(1)} périodes` : '—'}</td>
-                    <td>{renderDeviation(row.group_autonomy, groupAverageAutonomy, '—')}</td>
+                    <td style={{ textAlign: 'left' }}>{row.label}</td>
+                    <td style={{ textAlign: 'left' }}>{row.site_name || '—'}</td>
+                    <td style={{ textAlign: 'center' }}><strong style={{ color: '#d97706' }}>{row.autonomy != null ? `${row.autonomy.toFixed(1)} pér.` : '—'}</strong></td>
+                    <td style={{ textAlign: 'right' }}>{formatValue(row.avg_consumption, ' L')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -283,32 +303,33 @@ function DashboardPage({ onNavigate }) {
           </div>
         </section>
 
-        <section className="dashboard-table dashboard-table-secondary dashboard-table-small metric-panel">
+        {/* 2. Groupes à consommation anormale */}
+        <section className="dashboard-table metric-panel">
           <div className="metric-title-row">
             <div>
-              <span className="metric-label">Tableau secondaire</span>
-              <h3>Groupes les plus consommateurs</h3>
+              <span className="metric-label">Alertes Anomalies</span>
+              <h3>Groupes à consommation anormale</h3>
             </div>
           </div>
           <div className="dashboard-table-scroll">
             <table>
               <thead>
                 <tr>
-                  <th>Groupe</th>
-                  <th>Site</th>
-                  <th>Consommation moyenne</th>
-                  <th>Autonomie</th>
-                  <th>Écart</th>
+                  <th style={{ textAlign: 'left' }}>Groupe</th>
+                  <th style={{ textAlign: 'left' }}>Site</th>
+                  <th style={{ textAlign: 'right' }}>Conso moyenne</th>
+                  <th style={{ textAlign: 'right' }}>Dernière conso</th>
+                  <th style={{ textAlign: 'center' }}>Écart</th>
                 </tr>
               </thead>
               <tbody>
-                {secondaryRows.map((row) => (
+                {abnormalGroupRows.map((row) => (
                   <tr key={row.id}>
-                    <td>{row.label}</td>
-                    <td>{row.site_name || '—'}</td>
-                    <td>{formatValue(row.avg_consumption, ' L')}</td>
-                    <td>{row.autonomy != null ? `${row.autonomy.toFixed(1)} périodes` : '—'}</td>
-                    <td>{renderDeviation(row.avg_consumption, groupAverageConsumption, '—')}</td>
+                    <td style={{ textAlign: 'left' }}>{row.label}</td>
+                    <td style={{ textAlign: 'left' }}>{row.site_name || '—'}</td>
+                    <td style={{ textAlign: 'right' }}><strong style={{ color: '#dc2626' }}>{formatValue(row.avg_consumption, ' L')}</strong></td>
+                    <td style={{ textAlign: 'right' }}>{formatValue(row.latest_consumption, ' L')}</td>
+                    <td style={{ textAlign: 'center' }}>{renderDeviation(row.variance_pct, groupAverageVariance, '—')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -316,32 +337,33 @@ function DashboardPage({ onNavigate }) {
           </div>
         </section>
 
-        <section className="dashboard-table dashboard-table-tertiary dashboard-table-small metric-panel">
+        {/* 3. Groupes les plus gourmands */}
+        <section className="dashboard-table metric-panel">
           <div className="metric-title-row">
             <div>
-              <span className="metric-label">Tableau tertiaire</span>
-              <h3>Groupes à forte variance</h3>
+              <span className="metric-label">Consommation Groupes</span>
+              <h3>Groupes les plus gourmands</h3>
             </div>
           </div>
           <div className="dashboard-table-scroll">
             <table>
               <thead>
                 <tr>
-                  <th>Groupe</th>
-                  <th>Site</th>
-                  <th>Variance</th>
-                  <th>Autonomie</th>
-                  <th>Écart</th>
+                  <th style={{ textAlign: 'left' }}>Groupe</th>
+                  <th style={{ textAlign: 'left' }}>Site</th>
+                  <th style={{ textAlign: 'right' }}>Moy. conso</th>
+                  <th style={{ textAlign: 'right' }}>Dernière conso</th>
+                  <th style={{ textAlign: 'center' }}>Écart</th>
                 </tr>
               </thead>
               <tbody>
-                {tertiaryRows.map((row) => (
+                {topConsumerGroupRows.map((row) => (
                   <tr key={row.id}>
-                    <td>{row.label}</td>
-                    <td>{row.site_name || '—'}</td>
-                    <td>{row.variance_pct != null ? `${row.variance_pct.toFixed(1)} %` : '—'}</td>
-                    <td>{row.autonomy != null ? `${row.autonomy.toFixed(1)} périodes` : '—'}</td>
-                    <td>{renderDeviation(row.variance_pct, groupAverageVariance, '—')}</td>
+                    <td style={{ textAlign: 'left' }}>{row.label}</td>
+                    <td style={{ textAlign: 'left' }}>{row.site_name || '—'}</td>
+                    <td style={{ textAlign: 'right' }}><strong>{formatValue(row.avg_consumption, ' L')}</strong></td>
+                    <td style={{ textAlign: 'right' }}>{formatValue(row.latest_consumption, ' L')}</td>
+                    <td style={{ textAlign: 'center' }}>{renderDeviation(row.avg_consumption, groupAverageConsumption, '—')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -349,7 +371,40 @@ function DashboardPage({ onNavigate }) {
           </div>
         </section>
 
-        <section className="dashboard-alerts metric-panel">
+        {/* 4. Sites les plus gourmands */}
+        <section className="dashboard-table metric-panel">
+          <div className="metric-title-row">
+            <div>
+              <span className="metric-label">Consommation Sites</span>
+              <h3>Sites les plus gourmands</h3>
+            </div>
+          </div>
+          <div className="dashboard-table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: 'left' }}>Site</th>
+                  <th style={{ textAlign: 'right' }}>Moy. conso</th>
+                  <th style={{ textAlign: 'right' }}>Dernier volume</th>
+                  <th style={{ textAlign: 'center' }}>Écart</th>
+                </tr>
+              </thead>
+              <tbody>
+                {topConsumerSiteRows.map((row) => (
+                  <tr key={row.id}>
+                    <td style={{ textAlign: 'left' }}>{row.label}</td>
+                    <td style={{ textAlign: 'right' }}><strong>{formatValue(row.avg_consumption, ' L')}</strong></td>
+                    <td style={{ textAlign: 'right' }}>{formatValue(row.latest_volume, ' L')}</td>
+                    <td style={{ textAlign: 'center' }}>{renderDeviation(row.group_autonomy, groupAverageAutonomy, '—')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Notifications d'alertes en bas */}
+        <section className="dashboard-alerts metric-panel" style={{ gridColumn: '1 / -1' }}>
           <div className="metric-title-row">
             <div>
               <span className="metric-label">Notifications d'alertes</span>
@@ -366,15 +421,7 @@ function DashboardPage({ onNavigate }) {
                   </span>
                 </div>
                 <p>
-                  {alert.deviation != null ? (
-                    <>
-                      <span className={`deviation-inline ${alert.deviation >= 0 ? 'positive' : 'negative'}`}>
-                        {alert.deviation >= 0 ? '▲' : '▼'} {Math.abs(alert.deviation).toFixed(1)}%
-                      </span>{' '}
-                    </>
-                  ) : null}
-                  {alert.subtitle}{' '}
-                  {alert.report_label ? `Rapport concerné : ${alert.report_label}.` : ''}{' '}
+                  {renderAlertSubtitle(alert.subtitle)}{' '}
                   <span
                     className="alert-more"
                     onClick={() => {

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
+import { apiFetch } from '../auth.js'
 
 function SitesPage({ onNavigate }) {
   const chartPalette = useMemo(() => ({ axis: '#123d6d', grid: 'rgba(11, 61, 122, 0.08)', text: '#23466d' }), [])
@@ -82,17 +83,25 @@ function SitesPage({ onNavigate }) {
     const loadSitesData = async () => {
       try {
         const [metric2, metric3, metric4] = await Promise.all([
-          fetch('/api/v1/dashboard/volume_sites').then((response) => response.json()),
-          fetch('/api/v1/dashboard/duree_sites').then((response) => response.json()),
-          fetch('/api/v1/dashboard/consommation_sites').then((response) => response.json()),
+          apiFetch('/api/v1/dashboard/volume_sites'),
+          apiFetch('/api/v1/dashboard/duree_sites'),
+          apiFetch('/api/v1/dashboard/consommation_sites'),
         ])
+
+        if (!metric2?.labels || !Array.isArray(metric2.labels)) {
+          throw new Error('Labels non valides dans les données de l\'API site')
+        }
 
         setsitesDashboard({
           labels: metric2.labels,
-          volumeSeries: metric2.sites_series,
-          hoursSeries: Object.entries(metric3.sites_data || {}).map(([siteKey, site]) => ({ id: Number(siteKey) || site.id, nom_site: site.nom_site, datasets: site.datasets })),
-          consumptionSeries: metric4.sites_series,
-          defaultSiteId: metric3.default_site_id,
+          volumeSeries: metric2.sites_series || [],
+          hoursSeries: Object.entries(metric3?.sites_data || {}).map(([siteKey, site]) => ({
+            id: Number(siteKey) || site.id,
+            nom_site: site.nom_site,
+            datasets: site.datasets || []
+          })),
+          consumptionSeries: metric4?.sites_series || [],
+          defaultSiteId: metric3?.default_site_id,
         })
       } catch (error) {
         console.warn('Site backend unavailable, using demo fallback data.', error)
@@ -251,13 +260,13 @@ function SitesPage({ onNavigate }) {
           <div className="filter-field">
             <label htmlFor="site-start">Rapport début</label>
             <select id="site-start" value={String(startIdx)} onChange={(event) => setStartIdx(Number(event.target.value))}>
-              {sitesDashboard.labels.map((label, index) => (<option key={`${label}-${index}`} value={String(index)}>{label}</option>))}
+              {(sitesDashboard?.labels || []).map((label, index) => (<option key={`${label}-${index}`} value={String(index)}>{label}</option>))}
             </select>
           </div>
           <div className="filter-field">
             <label htmlFor="site-end">Rapport fin</label>
             <select id="site-end" value={String(endIdx)} onChange={(event) => setEndIdx(Number(event.target.value))}>
-              {sitesDashboard.labels.map((label, index) => (<option key={`${label}-${index}`} value={String(index)}>{label}</option>))}
+              {(sitesDashboard?.labels || []).map((label, index) => (<option key={`${label}-${index}`} value={String(index)}>{label}</option>))}
             </select>
           </div>
           <div className="filter-field">

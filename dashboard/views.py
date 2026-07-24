@@ -342,14 +342,14 @@ class DashboardOverviewAPIView(APIView):
                     'priority_level': 'urgent',
                     'site_id': site['id'],
                     'site_name': site['site_name'],
-                    'report_id': reports[-1].id if reports else None,
-                    'report_label': self._report_label(reports[-1]) if reports else None,
                     'title': f"Site {site['site_name']} : autonomie critique",
                     'subtitle': f"Autonomie estimée à {site['autonomy']} périodes avec une consommation moyenne de {site['avg_consumption']:.1f} L.",
                 })
 
         for group in group_rows:
             if group['is_abnormal']:
+                variance = group['variance_pct']
+                sign = "▲" if variance >= 0 else "▼"
                 alerts.append({
                     'id': f"group-{group['id']}",
                     'type': 'group_variance',
@@ -359,10 +359,8 @@ class DashboardOverviewAPIView(APIView):
                     'group_id': group['id'],
                     'group_label': group['label'],
                     'site_name': group['site_name'],
-                    'report_id': reports[-1].id if reports else None,
-                    'report_label': self._report_label(reports[-1]) if reports else None,
                     'title': f"Groupe {group['label']} : consommation anormale",
-                    'subtitle': f"Écart de {group['variance_pct']:.1f}% autour de la moyenne de consommation et {group['avg_consumption']:.1f} L en moyenne.",
+                    'subtitle': f"Écart de {sign}{abs(variance):.1f}% autour de la moyenne de consommation et {group['avg_consumption']:.1f} L en moyenne.",
                 })
 
         alerts.sort(key=lambda item: (item['priority_level'] != 'urgent', -item['priority_level'].count('urgent')))

@@ -122,16 +122,8 @@ button {
 .dashboard-grid {
   width: 100%;
   max-width: 100%;
-  grid-template-columns: minmax(0, 11fr) minmax(0, 9fr);
-  grid-template-rows: auto minmax(0, 1fr) minmax(0, 1fr) auto;
-  grid-template-areas:
-    "summary summary"
-    "large secondary"
-    "large tertiary"
-    "alerts alerts";
-  grid-auto-rows: minmax(0, auto);
-  align-items: stretch;
-  justify-items: stretch;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
 }
 
 .dashboard-grid > * {
@@ -142,7 +134,7 @@ button {
 }
 
 .dashboard-summary-grid {
-  grid-area: summary;
+  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 18px;
@@ -203,26 +195,8 @@ button {
   justify-self: stretch;
 }
 
-.dashboard-table-large {
-  grid-area: large;
-  grid-column: 1 / 3;
-  grid-row: 2 / 4;
-}
-
-.dashboard-table-secondary {
-  grid-area: secondary;
-  grid-column: 3 / 5;
-  grid-row: 2 / 3;
-}
-
-.dashboard-table-tertiary {
-  grid-area: tertiary;
-  grid-column: 3 / 5;
-  grid-row: 3 / 4;
-}
-
 .dashboard-alerts {
-  grid-area: alerts;
+  grid-column: 1 / -1;
 }
 
 .dashboard-table-scroll {
