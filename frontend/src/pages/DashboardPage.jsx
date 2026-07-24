@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
 import MetricPanel from '../components/MetricPanel.jsx'
+import { authFetch } from '../auth.js'
 
 const fallbackDashboardData = {
   metric1: {
@@ -80,10 +81,10 @@ function DashboardPage({ onNavigate }) {
     const loadDashboardData = async () => {
       try {
         const [metric1, metric2, metric3, metric4] = await Promise.all([
-          fetch('/api/v1/dashboard/etat_cuves').then((response) => response.json()),
-          fetch('/api/v1/dashboard/evolution_volumes').then((response) => response.json()),
-          fetch('/api/v1/dashboard/horaires_groupes').then((response) => response.json()),
-          fetch('/api/v1/dashboard/consommation').then((response) => response.json()),
+          authFetch('/api/v1/dashboard/etat_cuves').then((response) => response.json()),
+          authFetch('/api/v1/dashboard/evolution_volumes').then((response) => response.json()),
+          authFetch('/api/v1/dashboard/horaires_groupes').then((response) => response.json()),
+          authFetch('/api/v1/dashboard/consommation').then((response) => response.json()),
         ])
 
         setDashboardData({

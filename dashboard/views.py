@@ -857,31 +857,78 @@ class CuvesDashboardAPIView(APIView):
 
 # --- ViewSets REST Standard ---
 
+from rest_framework.permissions import IsAuthenticated
+from dashboard.permissions import IsAdminRole, user_is_admin
+
+
 class SiteViewSet(viewsets.ModelViewSet):
     queryset = Site.objects.all()
     serializer_class = SiteSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
+            return [IsAdminRole()]
+        return [IsAuthenticated()]
 
 
 class CuvePrincipaleViewSet(viewsets.ModelViewSet):
     queryset = CuvePrincipale.objects.all()
     serializer_class = CuvePrincipaleSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
+            return [IsAdminRole()]
+        return [IsAuthenticated()]
 
 
 class CuveJournaliereViewSet(viewsets.ModelViewSet):
     queryset = CuveJournaliere.objects.all()
     serializer_class = CuveJournaliereSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
+            return [IsAdminRole()]
+        return [IsAuthenticated()]
 
 
 class GroupeElectrogeneViewSet(viewsets.ModelViewSet):
     queryset = GroupeElectrogene.objects.all()
     serializer_class = GroupeElectrogeneSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_permissions(self):
+        if self.action in ('create', 'update', 'partial_update', 'destroy'):
+            return [IsAdminRole()]
+        return [IsAuthenticated()]
 
 
 class RapportViewSet(viewsets.ModelViewSet):
-    queryset = Rapport.objects.all()
+    queryset = Rapport.objects.all().order_by('-date_fin', '-id')
     serializer_class = RapportSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user_is_admin(user):
+            return qs
+        return qs.filter(created_by=user)
+
+    def perform_create(self, serializer):
+        serializer.save(created_by=self.request.user)
 
 
 class LigneRapportViewSet(viewsets.ModelViewSet):
     queryset = LigneRapport.objects.all()
     serializer_class = LigneRapportSerializer
+    permission_classes = [IsAuthenticated]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        user = self.request.user
+        if user_is_admin(user):
+            return qs
+        return qs.filter(rapport__created_by=user)

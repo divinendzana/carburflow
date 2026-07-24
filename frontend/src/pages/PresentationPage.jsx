@@ -1,21 +1,23 @@
 import React, { useEffect, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
+import { useAuth } from '../context/AuthContext.jsx'
+import { apiFetch } from '../auth.js'
 
 function PresentationPage({ onNavigate }) {
+  const { isAuthenticated, isAdmin } = useAuth()
   const [siteCount, setSiteCount] = useState(null)
   const [groupCount, setGroupCount] = useState(null)
   const [lastReportLabel, setLastReportLabel] = useState('')
 
   useEffect(() => {
+    if (!isAuthenticated || !isAdmin) return
+
     const loadOverviewData = async () => {
       try {
-        const [siteResponse, etatCuvesResponse] = await Promise.all([
-          fetch('/api/v1/sites?limit=1'),
-          fetch('/api/v1/dashboard/etat_cuves'),
+        const [siteData, etatCuvesData] = await Promise.all([
+          apiFetch('/api/v1/sites'),
+          apiFetch('/api/v1/dashboard/etat_cuves'),
         ])
-
-        const siteData = await siteResponse.json()
-        const etatCuvesData = await etatCuvesResponse.json()
 
         const count = typeof siteData.count === 'number'
           ? siteData.count
@@ -38,7 +40,7 @@ function PresentationPage({ onNavigate }) {
     }
 
     loadOverviewData()
-  }, [])
+  }, [isAuthenticated, isAdmin])
 
   return (
     <div className="app-shell">
@@ -46,38 +48,77 @@ function PresentationPage({ onNavigate }) {
       <main className="content-grid">
         <section className="hero-panel">
           <div className="hero-copy">
-            <span className="eyebrow">Vision globale</span>
+            <span className="eyebrow">CarburFlow</span>
             <h1>Supervision du carburant dans les sites</h1>
             <p>
               Plateforme de suivi et de pilotage des sites, groupes électrogènes et niveaux de stock.
-              La page de présentation donne une première lecture claire du projet et de sa couverture opérationnelle.
+              Les opérateurs déposent leurs relevés ; les administrateurs pilotent les alertes et analyses.
             </p>
           </div>
 
           <div className="hero-stats">
-            <div className="stat-grid">
-              <div className="stat-card">
-                <div className="stat-card-label">Sites actifs</div>
-                <div className="stat-card-value">{siteCount ?? '—'}</div>
-                <div className="stat-card-sub">Nombre de sites monitorés</div>
+            {isAuthenticated && isAdmin ? (
+              <div className="stat-grid">
+                <div className="stat-card">
+                  <div className="stat-card-label">Sites actifs</div>
+                  <div className="stat-card-value">{siteCount ?? '—'}</div>
+                  <div className="stat-card-sub">Sites monitorés</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-card-label">Groupes suivis</div>
+                  <div className="stat-card-value">{groupCount ?? '—'}</div>
+                  <div className="stat-card-sub">Groupes électrogènes</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-card-label">Dernier rapport</div>
+                  <div className="stat-card-value">{lastReportLabel || '—'}</div>
+                  <div className="stat-card-sub">Période disponible</div>
+                </div>
               </div>
-
-              <div className="stat-card">
-                <div className="stat-card-label">Groupes suivis</div>
-                <div className="stat-card-value">{groupCount ?? '—'}</div>
-                <div className="stat-card-sub">Groupes électrogènes couverts</div>
+            ) : (
+              <div className="stat-grid">
+                <div className="stat-card">
+                  <div className="stat-card-label">Admin</div>
+                  <div className="stat-card-value">Pilotage</div>
+                  <div className="stat-card-sub">Dashboard, alertes, sites</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-card-label">Opérateur</div>
+                  <div className="stat-card-value">Relevés</div>
+                  <div className="stat-card-sub">Norme Excel / CSV</div>
+                </div>
+                <div className="stat-card">
+                  <div className="stat-card-label">Norme</div>
+                  <div className="stat-card-value">.xlsx</div>
+                  <div className="stat-card-sub">Convertible en CSV</div>
+                </div>
               </div>
-
-              <div className="stat-card">
-                <div className="stat-card-label">Dernier rapport</div>
-                <div className="stat-card-value">{lastReportLabel || '—'}</div>
-                <div className="stat-card-sub">Date du dernier rapport disponible</div>
-              </div>
-            </div>
+            )}
 
             <div className="hero-actions">
-              <button type="button" className="btn-primary" onClick={() => onNavigate('dashboard')}>Voir le dashboard</button>
-              <button type="button" className="btn-ghost" onClick={() => onNavigate('site')}>Parcourir les sites</button>
+              {isAuthenticated && isAdmin ? (
+                <>
+                  <button type="button" className="btn-primary" onClick={() => onNavigate('dashboard')}>
+                    Ouvrir le dashboard
+                  </button>
+                  <button type="button" className="btn-ghost" onClick={() => onNavigate('reports')}>
+                    Voir les rapports
+                  </button>
+                </>
+              ) : isAuthenticated ? (
+                <button type="button" className="btn-primary" onClick={() => onNavigate('reports')}>
+                  Aller aux rapports
+                </button>
+              ) : (
+                <>
+                  <button type="button" className="btn-primary" onClick={() => onNavigate('login')}>
+                    Se connecter
+                  </button>
+                  <button type="button" className="btn-ghost" onClick={() => onNavigate('register')}>
+                    Créer un compte
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </section>

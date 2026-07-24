@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
+import { authFetch } from '../auth.js'
 
 function SitesPage({ onNavigate }) {
   const chartPalette = useMemo(() => ({ axis: '#123d6d', grid: 'rgba(11, 61, 122, 0.08)', text: '#23466d' }), [])
@@ -80,9 +81,9 @@ function SitesPage({ onNavigate }) {
     const loadSitesData = async () => {
       try {
         const [metric2, metric3, metric4] = await Promise.all([
-          fetch('/api/v1/dashboard/evolution_volumes').then((response) => response.json()),
-          fetch('/api/v1/dashboard/horaires_groupes').then((response) => response.json()),
-          fetch('/api/v1/dashboard/consommation').then((response) => response.json()),
+          authFetch('/api/v1/dashboard/evolution_volumes').then((response) => response.json()),
+          authFetch('/api/v1/dashboard/horaires_groupes').then((response) => response.json()),
+          authFetch('/api/v1/dashboard/consommation').then((response) => response.json()),
         ])
 
         setsitesDashboard({
@@ -209,7 +210,7 @@ function SitesPage({ onNavigate }) {
   if (!sitesDashboard) {
     return (
       <div className="app-shell dashboard-shell">
-        <Topbar activeView="site" onNavigate={onNavigate} />
+        <Topbar activeView="sites" onNavigate={onNavigate} />
         <main className="groups-grid"><div className="loading-state">Chargement des données du site...</div></main>
       </div>
     )
@@ -217,7 +218,7 @@ function SitesPage({ onNavigate }) {
 
   return (
     <div className="app-shell dashboard-shell">
-      <Topbar activeView="site" onNavigate={onNavigate} />
+      <Topbar activeView="sites" onNavigate={onNavigate} />
 
       <main className="groups-grid">
         <form className="groups-filter-bar" onSubmit={applyFilters}>

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
+import { authFetch } from '../auth.js'
 
 const buildDerivedMetric = (values = []) => {
   const normalizedValues = (values || []).map((value) => (typeof value === 'number' ? value : 0)).filter((value) => value > 0)
@@ -84,7 +85,7 @@ function GroupsPage({ onNavigate }) {
 
   const loadGroupsData = async (queryParams = '') => {
     try {
-      const response = await fetch(`/api/v1/dashboard/groupes${queryParams ? `?${queryParams}` : ''}`)
+      const response = await authFetch(`/api/v1/dashboard/groupes${queryParams ? `?${queryParams}` : ''}`)
       if (!response.ok) {
         throw new Error(`Backend error ${response.status}`)
       }
