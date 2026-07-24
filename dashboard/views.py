@@ -1,5 +1,11 @@
 import json
 import statistics
+import os
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
+from django.core.files.storage import FileSystemStorage
+from .parser import importer_fichier_rapport
 from django.db.models import Sum
 from rest_framework import viewsets
 from rest_framework.views import APIView
@@ -885,3 +891,29 @@ class RapportViewSet(viewsets.ModelViewSet):
 class LigneRapportViewSet(viewsets.ModelViewSet):
     queryset = LigneRapport.objects.all()
     serializer_class = LigneRapportSerializer
+
+
+class ImportRapportView(APIView):
+    def post(self, request, *args, **kwargs):
+        file_obj = request.FILES.get('file')
+        if not file_obj:
+            return Response(
+                {"error": "Aucun fichier n'a été fourni."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        fs = FileSystemStorage(location='temp/')
+        filename = fs.save(file_obj.name, file_obj)
+        filepath = fs.path(filename)
+
+        try:
+            resultat = importer_fichier_rapport(filepath)
+            return Response(resultat, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response(
+                {"error": f"Erreur lors de l'analyse du fichier : {str(e)}"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        finally:
+            if os.path.exists(filepath):
+                os.remove(filepath)

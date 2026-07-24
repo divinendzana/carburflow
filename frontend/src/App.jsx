@@ -4,6 +4,21 @@ import DashboardPage from './pages/DashboardPage.jsx'
 import SitesPage from './pages/SitesPage.jsx'
 import CuvesPage from './pages/CuvesPage.jsx'
 import GroupsPage from './pages/GroupsPage.jsx'
+import ImportPage from './pages/ImportPage.jsx'
+
+// Fonction utilitaire de style (déclarée HORS du composant)
+function getTabStyle(isActive) {
+  return {
+    padding: '8px 16px',
+    borderRadius: '20px',
+    border: 'none',
+    backgroundColor: isActive ? '#2563eb' : '#f1f5f9',
+    color: isActive ? '#ffffff' : '#475569',
+    fontWeight: '600',
+    cursor: 'pointer',
+    transition: 'all 0.2s ease'
+  }
+}
 
 function App() {
   const [view, setView] = useState('presentation')
@@ -20,6 +35,7 @@ function App() {
       sites: '/sites/',
       cuves: '/cuves/',
       groups: '/groupes/',
+      importation: '/importation/'
     }
 
     if (!nextView) {
@@ -63,6 +79,10 @@ function App() {
         setView('dashboard')
         return
       }
+      if (pathname.startsWith('/importation')) {
+        setView('importation')
+        return
+      }
       setView('presentation')
     }
 
@@ -78,6 +98,7 @@ function App() {
       {view === 'sites' && <SitesPage onNavigate={navigate} />}
       {view === 'cuves' && <CuvesPage onNavigate={navigate} />}
       {view === 'groups' && <GroupsPage onNavigate={navigate} />}
+      {view === 'importation' && <ImportPage onNavigate={navigate} />}
     </>
   )
 }

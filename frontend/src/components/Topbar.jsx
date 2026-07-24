@@ -14,6 +14,7 @@ function Topbar({ activeView, onNavigate }) {
 
       <nav className="topbar-actions" aria-label="Navigation principale">
         <button type="button" className={`nav-link ${activeView === 'presentation' ? 'active' : ''}`} onClick={() => onNavigate('presentation')}>Présentation</button>
+        <button type="button" className={`nav-link ${activeView === 'importation' ? 'active' : ''}`} onClick={() => onNavigate('importation')}>Importation</button>
         <button type="button" className={`nav-link ${activeView === 'dashboard' ? 'active' : ''}`} onClick={() => onNavigate('dashboard')}>Dashboard</button>
         <button type="button" className={`nav-link ${activeView === 'sites' ? 'active' : ''}`} onClick={() => onNavigate('sites')}>Sites</button>
         <button type="button" className={`nav-link ${activeView === 'cuves' ? 'active' : ''}`} onClick={() => onNavigate('cuves')}>Cuves</button>

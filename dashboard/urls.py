@@ -1,3 +1,5 @@
+from dashboard.views import ImportRapportView  # Import de la vue
+from django.contrib import admin
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from drf_spectacular.views import (
@@ -44,4 +46,8 @@ urlpatterns = [
 
     # Endpoints API v1 REST
     path('', include(router.urls)),
+
+    # importation
+    path('admin/', admin.site.urls),
+    path('api/import-rapport/', ImportRapportView.as_view(), name='import-rapport'),
 ]
