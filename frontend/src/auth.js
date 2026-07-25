@@ -46,8 +46,22 @@ export async function apiFetch(path, options = {}) {
     headers.Authorization = `Token ${token}`
   }
 
-  const response = await fetch(path, { ...options, headers })
+  let response
+  try {
+    response = await fetch(path, { ...options, headers })
+  } catch {
+    throw new Error(
+      'Impossible de joindre le serveur. Vérifiez que l’API Django tourne sur le port 8001 (python3 manage.py runserver 8001).',
+    )
+  }
+
+  // Proxy Vite down / backend down → souvent HTML ou corps vide (pas du JSON)
   const contentType = response.headers.get('content-type') || ''
+  if (response.status === 502 || response.status === 503 || response.status === 504) {
+    throw new Error(
+      'API indisponible (backend arrêté). Démarrez Django : python3 manage.py runserver 8001',
+    )
+  }
 
   if (options.raw || contentType.includes('application/octet-stream') || contentType.includes('spreadsheet') || contentType.includes('text/csv')) {
     if (!response.ok) {
@@ -64,11 +78,26 @@ export async function apiFetch(path, options = {}) {
   let data = null
   const text = await response.text()
   if (text) {
-    try { data = JSON.parse(text) } catch { data = { detail: text } }
+    try {
+      data = JSON.parse(text)
+    } catch {
+      // Réponse non-JSON (souvent HTML d’erreur proxy Vite si Django est down)
+      if (!response.ok || text.includes('ECONNREFUSED') || text.includes('proxy error')) {
+        throw new Error(
+          'API indisponible (backend arrêté). Démarrez Django : python3 manage.py runserver 8001',
+        )
+      }
+      data = { detail: text }
+    }
   }
 
   if (!response.ok) {
-    const error = new Error(extractErrorMessage(data) || 'Une erreur est survenue.')
+    const error = new Error(
+      extractErrorMessage(data)
+        || (response.status >= 500
+          ? 'API indisponible (backend arrêté). Démarrez Django : python3 manage.py runserver 8001'
+          : 'Une erreur est survenue.'),
+    )
     error.status = response.status
     error.data = data
     throw error

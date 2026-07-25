@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:tunnel": "VITE_TUNNEL=1 vite --host",
     "build": "vite build",
     "preview": "vite preview"
   },
