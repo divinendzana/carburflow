@@ -1,0 +1,7 @@
+# Empêche Linguist de compter d’éventuels runtimes / headers C locaux
+.tools/** linguist-vendored
+.tools/** -diff -merge
+
+# Bytecode / cache Python : ne pas compter comme code source
+**/__pycache__/** linguist-generated
+*.pyc linguist-generated
