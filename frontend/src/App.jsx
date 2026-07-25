@@ -114,6 +114,7 @@ function AppRoutes() {
     return <ReportsPage onNavigate={navigate} />
   }
 
+<<<<<<< HEAD
   // Une seule vue à la fois — éviter d’empiler HomePage sous Rapports / Dashboard
   if (view === 'dashboard') return <DashboardPage onNavigate={navigate} />
   if (view === 'sites') return <SitesPage onNavigate={navigate} />
@@ -121,6 +122,26 @@ function AppRoutes() {
   if (view === 'groups') return <GroupsPage onNavigate={navigate} />
   if (view === 'reports') return <ReportsPage onNavigate={navigate} />
   return <HomePage onNavigate={navigate} />
+=======
+  
+    // Si l'utilisateur est admin
+  switch (view) {
+    case 'dashboard':
+      return <DashboardPage onNavigate={navigate} />
+    case 'sites':
+      return <SitesPage onNavigate={navigate} />
+    case 'cuves':
+      return <CuvesPage onNavigate={navigate} />
+    case 'groups':
+      return <GroupsPage onNavigate={navigate} />
+    case 'reports':
+      return <ReportsPage onNavigate={navigate} />
+    case 'home':
+    default:
+      return <HomePage onNavigate={navigate} />
+  }
+  
+>>>>>>> 10afda8 (Fix: resolution des bugs d'importation et du routing frontend)
 }
 
 function App() {

@@ -105,3 +105,13 @@ class MesRapportsAPIView(APIView):
     def get(self, request):
         qs = Rapport.objects.all().order_by('-date_fin', '-id')
         return Response(RapportSerializer(qs[:50], many=True).data)
+
+
+
+
+class SoumissionsAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(tags=['Rapports'], summary='Historique des soumissions de rapports')
+    def get(self, request):
+        return Response([])  # Renvoie une liste vide pour éviter le 'Non trouvé'

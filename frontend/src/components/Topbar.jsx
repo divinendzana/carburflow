@@ -1,5 +1,5 @@
 import React from 'react'
-import logo from '../../../logo/logo_clair_navbar.jpeg'
+import logo from '../../../logo/logo_clair_navbar.svg'
 import { useAuth } from '../context/AuthContext.jsx'
 
 function Topbar({ activeView, onNavigate }) {
