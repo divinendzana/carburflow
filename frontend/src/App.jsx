@@ -8,7 +8,6 @@ import AuthPage from './pages/AuthPage.jsx'
 import ReportsPage from './pages/ReportsPage.jsx'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
 
-const ADMIN_VIEWS = new Set(['home', 'dashboard', 'sites', 'cuves', 'groups'])
 const USER_VIEWS = new Set(['reports'])
 const PUBLIC_VIEWS = new Set(['home', 'login', 'register'])
 
@@ -44,7 +43,7 @@ function AppRoutes() {
       register: '/register/',
     }
 
-    if (!nextView) nextView = 'home'
+    if (!nextView || nextView === 'presentation') nextView = 'home'
 
     if (!loading) {
       if (!isAuthenticated && !PUBLIC_VIEWS.has(nextView)) {
@@ -115,17 +114,13 @@ function AppRoutes() {
     return <ReportsPage onNavigate={navigate} />
   }
 
-  return (
-    <>
-      {view === 'home' && <HomePage onNavigate={navigate} />}
-      {view === 'dashboard' && <DashboardPage onNavigate={navigate} />}
-      {view === 'sites' && <SitesPage onNavigate={navigate} />}
-      {view === 'cuves' && <CuvesPage onNavigate={navigate} />}
-      {view === 'groups' && <GroupsPage onNavigate={navigate} />}
-      {view === 'reports' && <ReportsPage onNavigate={navigate} />}
-      {!ADMIN_VIEWS.has(view) && <HomePage onNavigate={navigate} />}
-    </>
-  )
+  // Une seule vue à la fois — éviter d’empiler HomePage sous Rapports / Dashboard
+  if (view === 'dashboard') return <DashboardPage onNavigate={navigate} />
+  if (view === 'sites') return <SitesPage onNavigate={navigate} />
+  if (view === 'cuves') return <CuvesPage onNavigate={navigate} />
+  if (view === 'groups') return <GroupsPage onNavigate={navigate} />
+  if (view === 'reports') return <ReportsPage onNavigate={navigate} />
+  return <HomePage onNavigate={navigate} />
 }
 
 function App() {

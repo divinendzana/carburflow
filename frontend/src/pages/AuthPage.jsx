@@ -1,7 +1,17 @@
 import React, { useEffect, useState } from 'react'
-import logo from '../../../logo/logo_clair_navbar.jpeg'
-import { useAuth } from '../context/AuthContext.jsx'
-import { publicSitesRequest } from '../auth.js'
+import { useAuth } from '@/context/AuthContext.jsx'
+import { publicSitesRequest } from '@/auth.js'
+import { SignInPage } from '@/components/ui/sign-in'
+import { SignUpPage } from '@/components/ui/sign-up'
+import { Button } from '@/components/ui/button'
+
+/* Login : contexte carburant / énergie (cuves, infrastructure) — même traitement photo que register */
+const LOGIN_HERO =
+  'https://images.unsplash.com/photo-1473341304170-971dccb5ac1e?auto=format&fit=crop&w=2160&q=80'
+
+/* Register : contexte terrain / opérations industrielles */
+const REGISTER_HERO =
+  'https://images.unsplash.com/photo-1504328345606-18bbc8c9d7d1?auto=format&fit=crop&w=2160&q=80'
 
 function AuthPage({ onNavigate, initialMode = 'login' }) {
   const { login, register, isAuthenticated, isAdmin } = useAuth()
@@ -16,7 +26,6 @@ function AuthPage({ onNavigate, initialMode = 'login' }) {
     password_confirm: '',
     site_id: '',
   })
-  const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -26,7 +35,7 @@ function AuthPage({ onNavigate, initialMode = 'login' }) {
 
   useEffect(() => {
     if (isAuthenticated) {
-      onNavigate(isAdmin ? 'presentation' : 'reports')
+      onNavigate(isAdmin ? 'dashboard' : 'reports')
     }
   }, [isAuthenticated, isAdmin, onNavigate])
 
@@ -48,41 +57,42 @@ function AuthPage({ onNavigate, initialMode = 'login' }) {
     onNavigate(nextMode === 'register' ? 'register' : 'login')
   }
 
-  const fillDemo = (kind) => {
-    if (kind === 'admin') {
-      setForm((prev) => ({ ...prev, username: 'admin', password: 'admin123' }))
-    } else {
-      setForm((prev) => ({ ...prev, username: 'user', password: 'user123' }))
-    }
-    setMode('login')
-    onNavigate('login')
-    setError('')
-  }
-
-  const handleSubmit = async (event) => {
+  const handleSignIn = async (event) => {
     event.preventDefault()
     setError('')
     setSubmitting(true)
     try {
-      if (mode === 'login') {
-        const user = await login(form.username.trim(), form.password)
-        onNavigate(user.role === 'admin' || user.is_staff ? 'presentation' : 'reports')
-      } else {
-        if (form.password !== form.password_confirm) {
-          setError('Les mots de passe ne correspondent pas.')
-          return
-        }
-        await register({
-          username: form.username.trim(),
-          email: form.email.trim(),
-          first_name: form.first_name.trim(),
-          last_name: form.last_name.trim(),
-          password: form.password,
-          password_confirm: form.password_confirm,
-          site_id: form.site_id ? Number(form.site_id) : null,
-        })
-        onNavigate('reports')
+      const formData = new FormData(event.currentTarget)
+      const username = String(formData.get('username') || '').trim()
+      const password = String(formData.get('password') || '')
+      const user = await login(username, password)
+      onNavigate(user.role === 'admin' || user.is_staff ? 'dashboard' : 'reports')
+    } catch (err) {
+      setError(err.message || 'Impossible de se connecter.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleRegister = async (event) => {
+    event.preventDefault()
+    setError('')
+    setSubmitting(true)
+    try {
+      if (form.password !== form.password_confirm) {
+        setError('Les mots de passe ne correspondent pas.')
+        return
       }
+      await register({
+        username: form.username.trim(),
+        email: form.email.trim(),
+        first_name: form.first_name.trim(),
+        last_name: form.last_name.trim(),
+        password: form.password,
+        password_confirm: form.password_confirm,
+        site_id: form.site_id ? Number(form.site_id) : null,
+      })
+      onNavigate('reports')
     } catch (err) {
       setError(err.message || 'Impossible de continuer.')
     } finally {
@@ -90,147 +100,84 @@ function AuthPage({ onNavigate, initialMode = 'login' }) {
     }
   }
 
+  const fillDemoInputs = (username, password) => {
+    requestAnimationFrame(() => {
+      const userInput = document.getElementById('sign-in-username')
+      const passInput = document.getElementById('sign-in-password')
+      if (userInput) userInput.value = username
+      if (passInput) passInput.value = password
+    })
+  }
+
   return (
-    <div className="auth-shell">
-      <div className="auth-atmosphere" aria-hidden="true" />
-      <section className="auth-panel">
-        <aside className="auth-brand">
-          <div className="auth-brand-glow" aria-hidden="true" />
-          <button type="button" className="auth-back" onClick={() => onNavigate('presentation')}>
-            ← Retour
-          </button>
-          <div className="auth-brand-content">
-            <img src={logo} alt="Logo CarburFlow" className="auth-logo" />
-            <p className="auth-brand-kicker">CarburFlow</p>
-            <h1>Le carburant de vos sites, sous contrôle.</h1>
-            <p className="auth-brand-copy">
-              Espace sécurisé pour les administrateurs et les opérateurs terrain qui déposent les relevés hebdomadaires.
-            </p>
-            <ul className="auth-points">
-              <li><span className="auth-point-dot" />Admin — pilotage &amp; alertes</li>
-              <li><span className="auth-point-dot" />Opérateur — envoi des rapports</li>
-              <li><span className="auth-point-dot" />Norme Excel ↔ CSV</li>
-            </ul>
-          </div>
-        </aside>
+    <div className="relative bg-background text-foreground">
+      <div className="absolute left-4 top-4 z-20 sm:left-6 sm:top-6">
+        <Button variant="ghost" size="sm" onClick={() => onNavigate('home')}>
+          ← Retour
+        </Button>
+      </div>
 
-        <div className="auth-form-side">
-          <div className="auth-form-card">
-            <div className="auth-mode-switch" role="tablist">
-              <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => switchMode('login')}>
-                Connexion
-              </button>
-              <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => switchMode('register')}>
-                Inscription
-              </button>
+      {mode === 'login' ? (
+        <SignInPage
+          title={
+            <span className="font-display tracking-tight text-foreground">
+              <span className="font-semibold text-petrol">CarburFlow</span>
+              <span className="mt-2 block font-medium">Bon retour</span>
+            </span>
+          }
+          description="Connectez-vous pour piloter vos stocks ou déposer un relevé terrain."
+          heroImageSrc={LOGIN_HERO}
+          heroHeadline="Chaque litre compte."
+          heroSubline="Pilotez vos stocks multi-sites sans tableurs dispersés ni alertes trop tardives."
+          heroPhrases={[
+            'Une vision claire, site par site.',
+            'Des relevés terrain qui arrivent à temps.',
+            'Relever. Déposer. Piloter.',
+          ]}
+          onSignIn={handleSignIn}
+          onCreateAccount={() => switchMode('register')}
+          error={error}
+          submitting={submitting}
+          demoSlot={
+            <div className="animate-element animate-delay-200 flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fillDemoInputs('admin', 'admin123')}
+              >
+                Démo admin
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => fillDemoInputs('user', 'user123')}
+              >
+                Démo opérateur
+              </Button>
             </div>
-
-            <header className="auth-form-header">
-              <h2>{mode === 'login' ? 'Bon retour' : 'Créer un compte'}</h2>
-              <p>
-                {mode === 'login'
-                  ? 'Accédez à votre espace CarburFlow.'
-                  : 'Les inscriptions créent un compte opérateur (envoi de rapports).'}
-              </p>
-            </header>
-
-            {mode === 'login' && (
-              <div className="auth-demo-row">
-                <button type="button" className="auth-demo-chip" onClick={() => fillDemo('admin')}>Démo admin</button>
-                <button type="button" className="auth-demo-chip" onClick={() => fillDemo('user')}>Démo opérateur</button>
-              </div>
-            )}
-
-            <form className="auth-form" onSubmit={handleSubmit} noValidate>
-              {mode === 'register' && (
-                <div className="auth-row">
-                  <label className="auth-field">
-                    <span>Prénom</span>
-                    <input type="text" value={form.first_name} onChange={updateField('first_name')} placeholder="Amina" />
-                  </label>
-                  <label className="auth-field">
-                    <span>Nom</span>
-                    <input type="text" value={form.last_name} onChange={updateField('last_name')} placeholder="Ngono" />
-                  </label>
-                </div>
-              )}
-
-              <label className="auth-field">
-                <span>Nom d’utilisateur</span>
-                <input type="text" required autoComplete="username" value={form.username} onChange={updateField('username')} placeholder="ex. agent.douala" />
-              </label>
-
-              {mode === 'register' && (
-                <>
-                  <label className="auth-field">
-                    <span>Email</span>
-                    <input type="email" value={form.email} onChange={updateField('email')} placeholder="vous@entreprise.cm" />
-                  </label>
-                  <label className="auth-field">
-                    <span>Site rattaché (optionnel)</span>
-                    <select value={form.site_id} onChange={updateField('site_id')}>
-                      <option value="">— Aucun —</option>
-                      {sites.map((site) => (
-                        <option key={site.id} value={site.id}>{site.nom_site}</option>
-                      ))}
-                    </select>
-                  </label>
-                </>
-              )}
-
-              <label className="auth-field">
-                <span>Mot de passe</span>
-                <div className="auth-password-wrap">
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    minLength={6}
-                    autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                    value={form.password}
-                    onChange={updateField('password')}
-                    placeholder="••••••••"
-                  />
-                  <button type="button" className="auth-password-toggle" onClick={() => setShowPassword((v) => !v)}>
-                    {showPassword ? 'Masquer' : 'Voir'}
-                  </button>
-                </div>
-              </label>
-
-              {mode === 'register' && (
-                <label className="auth-field">
-                  <span>Confirmer</span>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    minLength={6}
-                    value={form.password_confirm}
-                    onChange={updateField('password_confirm')}
-                    placeholder="••••••••"
-                  />
-                </label>
-              )}
-
-              {error && <div className="auth-error" role="alert">{error}</div>}
-
-              <button type="submit" className="auth-submit" disabled={submitting}>
-                {submitting ? 'Patientez…' : mode === 'login' ? 'Se connecter' : 'Créer mon compte'}
-              </button>
-            </form>
-
-            <p className="auth-footnote">
-              {mode === 'login' ? (
-                <>Pas encore de compte ? <button type="button" className="auth-inline-link" onClick={() => switchMode('register')}>S’inscrire</button></>
-              ) : (
-                <>Déjà inscrit ? <button type="button" className="auth-inline-link" onClick={() => switchMode('login')}>Se connecter</button></>
-              )}
-            </p>
-
-            <p className="auth-demo-hint">
-              Comptes démo : <code>admin / admin123</code> · <code>user / user123</code>
-            </p>
-          </div>
-        </div>
-      </section>
+          }
+        />
+      ) : (
+        <SignUpPage
+          heroImageSrc={REGISTER_HERO}
+          heroHeadline="Votre relevé, enfin simple."
+          heroSubline="Rejoignez les équipes qui déposent leurs rapports sans friction ni tableurs dispersés."
+          heroPhrases={[
+            'Norme Excel ou CSV, prête en quelques minutes.',
+            'Historique clair de chaque envoi.',
+            'L’admin pilote. Vous relevez et déposez.',
+          ]}
+          onSignUp={handleRegister}
+          onSignIn={() => switchMode('login')}
+          error={error}
+          submitting={submitting}
+          sites={sites}
+          form={form}
+          onFieldChange={updateField}
+        />
+      )}
     </div>
   )
 }
