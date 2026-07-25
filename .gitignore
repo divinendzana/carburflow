@@ -30,8 +30,10 @@ node_modules/
 frontend/dist/
 frontend/node_modules/
 
-# Runtime Node local (ne jamais versionner — fausse les stats Linguist / gros binaires)
+# Runtime Node local — NE JAMAIS COMMITTER / PUSHER (binaires + headers C)
 .tools/
+.tools
+**/.tools/
 .npm
 .vite/
 vite.config.js.timestamp-*
