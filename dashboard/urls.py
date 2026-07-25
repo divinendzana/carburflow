@@ -27,9 +27,9 @@ from dashboard.views import (
     GroupeElectrogeneViewSet,
     RapportViewSet,
     LigneRapportViewSet,
-    SitesVolumeAPIView,
-    SitesDureeAPIView,
-    SitesConsommationAPIView,
+    SitesDashboardAPIView,
+
+
     DashboardOverviewAPIView,
     GroupesAPIView,
 )
@@ -63,9 +63,7 @@ urlpatterns = [
     path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 
     path('', include(router.urls)),
-    path('dashboard/volume_sites', SitesVolumeAPIView.as_view(), name='dashboard-volume-sites'),
-    path('dashboard/duree_sites', SitesDureeAPIView.as_view(), name='dashboard-duree-sites'),
-    path('dashboard/consommation_sites', SitesConsommationAPIView.as_view(), name='dashboard-consommation-sites'),
+    path('dashboard/sites', SitesDashboardAPIView.as_view(), name='dashboard-sites'),
     path('dashboard/overview', DashboardOverviewAPIView.as_view(), name='dashboard-overview'),
     path('dashboard/groupes', GroupesAPIView.as_view(), name='dashboard-groupes'),
 ]

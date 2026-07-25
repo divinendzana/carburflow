@@ -20,6 +20,7 @@ from dashboard.serializers import (
     RapportSerializer,
     LigneRapportSerializer,
 )
+from dashboard.utils import calculs as calc
 
 # --- ViewSets REST Standard ---
 
@@ -185,63 +186,238 @@ class SitesConsommationAPIView(APIView):
             'sites_series': sites_series,
         })
 
-
-class DashboardOverviewAPIView(APIView):
-    """API dédiée au dashboard : résumé, tableaux de classement et alertes métier."""
-
-    def _report_label(self, report):
-        return f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}"
-
-    def _mean(self, values):
-        if not values:
-            return 0.0
-        return sum(values) / len(values)
+class SitesDashboardAPIView(APIView):
+    """API consolidée pour la page Sites : volume, durée et consommation - Version optimisée."""
 
     def get(self, request):
         reports = list(Rapport.objects.order_by('date_debut', 'id'))
         sites = list(CuvePrincipale.objects.order_by('id'))
         groups = list(GroupeElectrogene.objects.order_by('id'))
+        report_ids = [r.id for r in reports]
 
+        # --- Une seule requête pour toutes les lignes (comme dans DashboardOverviewAPIView) ---
+        lignes_all = list(
+            LigneRapport.objects.filter(rapport_id__in=report_ids)
+            .select_related('cuve_journaliere')
+            .only(
+                'rapport_id', 'groupe_electrogene_id', 'cuve_principale_id',
+                'cuve_journaliere_id', 'cuve_journaliere__cuve_principale_id',
+                'quantite_gasoil_cuve_principale', 'quantite_gasoil_cuve_journaliere',
+                'depotage', 'compteur_horaire',
+            )
+        )
+
+        labels = [f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}" for report in reports]
+        site_colors = ['#0b3d7a', '#3b82f6', '#60a5fa', '#1d4ed8', '#0ea5e9']
+        group_colors = ['#0b3d7a', '#3b82f6', '#60a5fa', '#1d4ed8', '#0ea5e9']
+
+        # --- Indexation des lignes par (site_id, rapport_id) ---
+        lines_by_site_report = {}
+        for line in lignes_all:
+            site_ids = set()
+            if line.cuve_principale_id:
+                site_ids.add(line.cuve_principale_id)
+            if line.cuve_journaliere_id and line.cuve_journaliere and line.cuve_journaliere.cuve_principale_id:
+                site_ids.add(line.cuve_journaliere.cuve_principale_id)
+            for sid in site_ids:
+                lines_by_site_report.setdefault((sid, line.rapport_id), []).append(line)
+
+        # --- Indexation identique à GroupesAPIView, pour réutiliser calc.calculer_groupes ---
+        # (group_id, rapport_id) -> lignes du groupe, tous sites confondus
+        lines_by_group_report = {}
+        for line in lignes_all:
+            if line.groupe_electrogene_id:
+                lines_by_group_report.setdefault((line.groupe_electrogene_id, line.rapport_id), []).append(line)
+
+        # groupe -> site principal (vote majoritaire)
+        group_site_counts = {}
+        for line in lignes_all:
+            if line.groupe_electrogene_id and line.cuve_principale_id:
+                counts = group_site_counts.setdefault(line.groupe_electrogene_id, {})
+                counts[line.cuve_principale_id] = counts.get(line.cuve_principale_id, 0) + 1
+        group_primary_site_ids = {
+            gid: max(counts.items(), key=lambda item: item[1])[0]
+            for gid, counts in group_site_counts.items()
+        }
+
+        # (site_id, rapport_id) -> ids des groupes actifs sur ce site à ce rapport
+        groups_by_site_report = {}
+        for line in lignes_all:
+            if line.cuve_principale_id and line.groupe_electrogene_id:
+                groups_by_site_report.setdefault((line.cuve_principale_id, line.rapport_id), set()).add(
+                    line.groupe_electrogene_id
+                )
+        groupes_by_id = {g.id: g for g in groups}
+
+        # volume/delta courant par (site, rapport) — nécessaire au partage par puissance
+        site_report_state = calc.build_site_report_state(reports, sites, lines_by_site_report)
+
+        # group_blocks calculés UNE FOIS avec l'algorithme de GroupesAPIView, réutilisés
+        # pour construire hours_series et autonomy_by_site plus bas — c'est ce qui garantit
+        # que les heures/consommation/autonomie par groupe sont identiques à la page Groupes.
+        all_group_blocks = calc.calculer_groupes(
+            reports=reports,
+            groupes=groups,
+            sites=sites,
+            lines_by_group_report=lines_by_group_report,
+            site_report_state=site_report_state,
+            groups_by_site_report=groups_by_site_report,
+            groupes_by_id=groupes_by_id,
+            group_primary_site_ids=group_primary_site_ids,
+        )
+        group_blocks_by_site = {}
+        for gb in all_group_blocks:
+            if gb['site_id'] is not None:
+                group_blocks_by_site.setdefault(gb['site_id'], []).append(gb)
+
+        # --- Construction des séries ---
+        volume_series = []
+        consumption_series = []
+        hours_series = []
+        autonomy_by_site = {}
+
+        for idx, site in enumerate(sites):
+            site_id = site.id
+            site_name = site.identifiant
+            color = site_colors[idx % len(site_colors)]
+
+            volume_data, consumption_data = calc.calculer_site_series(
+                reports, lines_by_site_report, site_id
+            )
+
+            volume_series.append({
+                'id': site_id,
+                'nom_site': site_name,
+                'label': site_name,
+                'data': volume_data,
+                'color': color,
+            })
+
+            consumption_series.append({
+                'id': site_id,
+                'nom_site': site_name,
+                'label': site_name,
+                'data': consumption_data,
+                'color': color,
+            })
+
+            # --- Données de durée par groupe : reprises telles quelles depuis
+            # all_group_blocks (algorithme GroupesAPIView), au lieu d'un recalcul
+            # maison des heures par (site, groupe, rapport). ---
+            site_datasets = []
+            site_groups = group_blocks_by_site.get(site_id, [])
+            for group_idx, gb in enumerate(site_groups):
+                if any(v > 0 for v in gb['hours_run']):
+                    site_datasets.append({
+                        'label': gb['label'],
+                        'data': gb['hours_run'],
+                        'borderColor': group_colors[group_idx % len(group_colors)],
+                        'backgroundColor': f"{group_colors[group_idx % len(group_colors)]}20",
+                    })
+
+            hours_series.append({
+                'id': site_id,
+                'nom_site': site_name,
+                'datasets': site_datasets,
+            })
+
+            # --- Autonomie du site = max() des autonomies de ses groupes ---
+            # Le site tient tant qu'au moins un groupe rattaché tient : on prend le
+            # groupe le plus autonome (le plus sain), pas le plus critique. Un groupe
+            # en is_infinite_consumption (0h, conso avérée sans heures) ne l'emporte
+            # que si AUCUN groupe du site n'a d'autonomie finie — sinon un site avec un
+            # groupe sain et un groupe à 0h serait à tort ramené à 0h alors qu'il tient
+            # grâce à l'autre groupe.
+            finite_hours = [g['autonomie_hours'] for g in site_groups if g['autonomie_hours'] is not None]
+            if finite_hours:
+                aut_hours = round(max(finite_hours), 1)
+                fmt_aut = calc.formater_autonomie(aut_hours)
+                has_infinite_cons, is_infinite_aut = False, False
+            elif any(g['is_infinite_consumption'] for g in site_groups):
+                aut_hours, fmt_aut = 0.0, "0h"
+                has_infinite_cons, is_infinite_aut = True, False
+            else:
+                aut_hours, fmt_aut = None, "∞"
+                has_infinite_cons, is_infinite_aut = False, True
+
+            autonomy_by_site[str(site_id)] = {
+                'autonomie_hours': aut_hours,
+                'formatted_autonomy': fmt_aut,
+                'is_infinite_consumption': has_infinite_cons,
+                'is_infinite_autonomy': is_infinite_aut,
+            }
+
+        return Response({
+            'labels': labels,
+            'volumeSeries': volume_series,
+            'hoursSeries': hours_series,
+            'consumptionSeries': consumption_series,
+            'autonomyBySite': autonomy_by_site,
+            'defaultSiteId': sites[0].id if sites else None,
+        })
+        
+class DashboardOverviewAPIView(APIView):
+    """API dédiée au dashboard : résumé, tableaux de classement et alertes métier."""
+
+    AUTONOMY_CRITICAL_THRESHOLD = 2.0
+    AUTONOMY_CRITICAL_HOURS = 24.0
+    ABNORMAL_CONSUMPTION_RATIO = 1.2
+    ABNORMAL_VARIANCE_THRESHOLD = 15.0
+
+    def _report_label(self, report):
+        return f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}"
+
+    def _mean(self, values):
+        return sum(values) / len(values) if values else 0.0
+
+    def get(self, request):
+        reports = list(Rapport.objects.order_by('date_debut', 'id'))
+        sites = list(CuvePrincipale.objects.order_by('id'))
+        groups = list(GroupeElectrogene.objects.order_by('id'))
+        report_ids = [r.id for r in reports]
+
+        # --- Une seule requête pour toutes les lignes ---
+        lignes_all = list(
+            LigneRapport.objects.filter(rapport_id__in=report_ids)
+            .select_related('cuve_journaliere')
+            .only(
+                'rapport_id', 'groupe_electrogene_id', 'cuve_principale_id',
+                'cuve_journaliere_id', 'cuve_journaliere__cuve_principale_id',
+                'quantite_gasoil_cuve_principale', 'quantite_gasoil_cuve_journaliere',
+                'depotage', 'compteur_horaire',
+            )
+        )
+
+        # Indexation des lignes par (site_id, rapport_id)
+        lines_by_site_report = {}
+        for line in lignes_all:
+            site_ids = set()
+            if line.cuve_principale_id:
+                site_ids.add(line.cuve_principale_id)
+            if line.cuve_journaliere_id and line.cuve_journaliere and line.cuve_journaliere.cuve_principale_id:
+                site_ids.add(line.cuve_journaliere.cuve_principale_id)
+            for sid in site_ids:
+                lines_by_site_report.setdefault((sid, line.rapport_id), []).append(line)
+
+        # --- Indexation identique à GroupesAPIView, pour réutiliser calc.calculer_groupes ---
+        # (group_id, rapport_id) -> lignes du groupe, tous sites confondus
+        lines_by_group_report = {}
+        for line in lignes_all:
+            if line.groupe_electrogene_id:
+                lines_by_group_report.setdefault((line.groupe_electrogene_id, line.rapport_id), []).append(line)
+
+        # --- Sites ---
         site_rows = []
         site_latest_volume_map = {}
         for site in sites:
-            consumption_series = []
-            volume_series = []
-            previous_volume = None
+            volume_series, consumption_series = calc.calculer_site_series(
+                reports, lines_by_site_report, site.id
+            )
 
-            for report in reports:
-                lines = LigneRapport.objects.filter(rapport=report)
-                current_volume = 0.0
-                depotage_total = 0.0
-
-                for line in lines:
-                    if line.cuve_principale_id == site.id:
-                        current_volume += float(line.quantite_gasoil_cuve_principale or 0.0)
-                        current_volume += float(line.quantite_gasoil_cuve_journaliere or 0.0)
-
-                    if line.cuve_journaliere_id and line.cuve_journaliere and line.cuve_journaliere.cuve_principale_id == site.id:
-                        current_volume += float(line.quantite_gasoil_cuve_journaliere or 0.0)
-
-                    if line.cuve_principale_id == site.id or (
-                        line.cuve_journaliere_id and line.cuve_journaliere and line.cuve_journaliere.cuve_principale_id == site.id
-                    ):
-                        depotage_total += float(line.depotage or 0.0)
-
-                if previous_volume is None:
-                    consumption_value = 0.0
-                else:
-                    consumption_value = max(0.0, previous_volume - current_volume + depotage_total)
-
-                consumption_series.append(round(consumption_value, 1))
-                volume_series.append(round(current_volume, 1))
-                previous_volume = current_volume
-
-            avg_consumption = round(self._mean(consumption_series), 1) if consumption_series else 0.0
+            meaningful_consumption = consumption_series[1:] if len(consumption_series) > 1 else consumption_series
+            avg_consumption = round(self._mean(meaningful_consumption), 1)
             latest_consumption = round(consumption_series[-1], 1) if consumption_series else 0.0
             latest_volume = round(volume_series[-1], 1) if volume_series else 0.0
-            autonomy = None
-            if avg_consumption > 0:
-                autonomy = round(latest_volume / avg_consumption, 1)
 
             site_rows.append({
                 'id': site.id,
@@ -250,90 +426,142 @@ class DashboardOverviewAPIView(APIView):
                 'avg_consumption': avg_consumption,
                 'latest_consumption': latest_consumption,
                 'latest_volume': latest_volume,
-                'autonomy': autonomy,
+                'autonomy': None,
+                'autonomie_hours': None,
+                'formatted_autonomy': None,
+                'is_infinite_consumption': False,
+                'is_infinite_autonomy': False,
             })
             site_latest_volume_map[site.id] = latest_volume
 
         site_rows.sort(key=lambda item: item['avg_consumption'], reverse=True)
 
-        group_site_map = {}
-        for report in reports:
-            for line in LigneRapport.objects.filter(rapport=report):
-                if line.groupe_electrogene_id and line.cuve_principale_id:
-                    group_site_map.setdefault(line.groupe_electrogene_id, {})
-                    group_site_map[line.groupe_electrogene_id][line.cuve_principale_id] = (
-                        group_site_map[line.groupe_electrogene_id].get(line.cuve_principale_id, 0) + 1
-                    )
+        # --- Groupes (avec calculs partagés) ---
+        groups_by_site = {}
+        group_site_counts = {}
+        for line in lignes_all:
+            if line.groupe_electrogene_id and line.cuve_principale_id:
+                counts = group_site_counts.setdefault(line.groupe_electrogene_id, {})
+                counts[line.cuve_principale_id] = counts.get(line.cuve_principale_id, 0) + 1
+        group_primary_site_ids = {
+            gid: max(counts.items(), key=lambda item: item[1])[0]
+            for gid, counts in group_site_counts.items()
+        }
 
+        groups_by_site_report = {}
+        for line in lignes_all:
+            if line.cuve_principale_id and line.groupe_electrogene_id:
+                groups_by_site_report.setdefault((line.cuve_principale_id, line.rapport_id), set()).add(
+                    line.groupe_electrogene_id
+                )
+        groupes_by_id = {g.id: g for g in groups}
+
+        site_report_state = calc.build_site_report_state(reports, sites, lines_by_site_report)
+
+        group_blocks = calc.calculer_groupes(
+            reports=reports,
+            groupes=groups,
+            sites=sites,
+            lines_by_group_report=lines_by_group_report,
+            site_report_state=site_report_state,
+            groups_by_site_report=groups_by_site_report,
+            groupes_by_id=groupes_by_id,
+            group_primary_site_ids=group_primary_site_ids,
+            selected_site_id=None,
+        )
+
+        # Conversion des group_blocks en group_rows
         group_rows = []
-        for group in groups:
-            primary_site_id = None
-            counts = group_site_map.get(group.id, {})
-            if counts:
-                primary_site_id = max(counts.items(), key=lambda item: item[1])[0]
+        for block in group_blocks:
+            hours_series = block['hours_run']
+            consumption_series = block['consumption']
+            meaningful_consumption = consumption_series[1:] if len(consumption_series) > 1 else consumption_series
+            meaningful_hours = hours_series[1:] if len(hours_series) > 1 else hours_series
 
-            hours_series = []
-            consumption_series = []
-            previous_counter = None
-
-            for report in reports:
-                lines = LigneRapport.objects.filter(rapport=report, groupe_electrogene=group)
-                if primary_site_id is not None:
-                    lines = lines.filter(cuve_principale_id=primary_site_id)
-
-                report_counter = 0.0
-                report_consumption = 0.0
-                for line in lines:
-                    if line.compteur_horaire is not None:
-                        report_counter = max(report_counter, float(line.compteur_horaire))
-                    report_consumption += float(line.depotage or 0.0)
-
-                if previous_counter is None:
-                    hour_delta = 0.0
-                else:
-                    hour_delta = max(0.0, report_counter - previous_counter)
-
-                hours_series.append(round(hour_delta, 1))
-                consumption_series.append(round(report_consumption, 1))
-                previous_counter = report_counter
-
-            avg_consumption = round(self._mean(consumption_series), 1) if consumption_series else 0.0
+            avg_consumption = round(self._mean(meaningful_consumption), 1)
             latest_consumption = round(consumption_series[-1], 1) if consumption_series else 0.0
+            avg_hours = round(self._mean(meaningful_hours), 1)
             latest_hours = round(hours_series[-1], 1) if hours_series else 0.0
-            avg_hours = round(self._mean(hours_series), 1) if hours_series else 0.0
-            variance_pct = 0.0
-            if avg_consumption > 0 and len(consumption_series) > 1:
-                variance_pct = round((statistics.pstdev(consumption_series) / avg_consumption) * 100, 1)
 
-            autonomy = None
-            if primary_site_id is not None:
-                latest_site_volume = float(site_latest_volume_map.get(primary_site_id, 0.0) or 0.0)
-                if avg_consumption > 0:
-                    autonomy = round(latest_site_volume / avg_consumption, 1)
+            variance_pct = 0.0
+            if avg_consumption > 0 and len(meaningful_consumption) > 1:
+                variance_pct = round((statistics.pstdev(meaningful_consumption) / avg_consumption) * 100, 1)
+
+            is_abnormal = (
+                avg_consumption > 0
+                and block.get('mean_hourly_consumption_deduite', 0) > 0
+                and block.get('mean_hourly_consumption', 0) > 0
+                and block.get('mean_hourly_consumption_deduite', 0) > block.get('mean_hourly_consumption', 0) * 1.2
+                and variance_pct > 15.0
+            )
 
             group_rows.append({
-                'id': group.id,
-                'label': f"G#{group.id} ({group.marque} {group.puissance})",
-                'site_id': primary_site_id,
-                'site_name': next((site.identifiant for site in sites if site.id == primary_site_id), ''),
+                'id': block['id'],
+                'label': block['label'],
+                'site_id': block['site_id'],
+                'site_name': block['site_nom'],
                 'avg_consumption': avg_consumption,
                 'latest_consumption': latest_consumption,
                 'avg_hours': avg_hours,
                 'latest_hours': latest_hours,
                 'variance_pct': variance_pct,
-                'autonomy': autonomy,
-                'is_abnormal': False,
+                'autonomy': block['autonomie_hours'],
+                'autonomie_hours': block['autonomie_hours'],
+                'formatted_autonomy': block['formatted_autonomy'],
+                'is_infinite_consumption': block['is_infinite_consumption'],
+                'is_infinite_autonomy': block['is_infinite_autonomy'],
+                'latest_main_volume': block['latest_main_volume'],
+                'mean_hourly_consumption': block['mean_hourly_consumption'],
+                'mean_hourly_consumption_deduite': block['mean_hourly_consumption_deduite'],
+                'latest_hourly_consumption': block['latest_hourly_consumption'],
+                'is_abnormal': is_abnormal,
             })
 
-        mean_group_consumption = self._mean([group['avg_consumption'] for group in group_rows]) if group_rows else 0.0
-        for group in group_rows:
-            group['is_abnormal'] = group['avg_consumption'] > 0 and group['avg_consumption'] > mean_group_consumption * 1.2 and group['variance_pct'] > 15
+        # --- Autonomie de site ---
+        groups_by_site = {}
+        for g in group_rows:
+            if g['site_id'] is not None:
+                groups_by_site.setdefault(g['site_id'], []).append(g)
 
-        group_rows.sort(key=lambda item: item['avg_consumption'], reverse=True)
+        site_rows_by_id = {s['id']: s for s in site_rows}
+        for site_id, site_groups in groups_by_site.items():
+            site = site_rows_by_id.get(site_id)
+            if site is None:
+                continue
+
+            finite_hours = [g['autonomie_hours'] for g in site_groups if g['autonomie_hours'] is not None]
+            if finite_hours:
+                aut_hours = round(max(finite_hours), 1)
+                site['autonomie_hours'] = aut_hours
+                site['formatted_autonomy'] = calc.formater_autonomie(aut_hours)
+                site['is_infinite_consumption'] = False
+                site['is_infinite_autonomy'] = False
+            elif any(g['is_infinite_consumption'] for g in site_groups):
+                site['autonomie_hours'] = 0.0
+                site['formatted_autonomy'] = '0h'
+                site['is_infinite_consumption'] = True
+                site['is_infinite_autonomy'] = False
+            else:
+                site['autonomie_hours'] = None
+                site['formatted_autonomy'] = '∞'
+                site['is_infinite_consumption'] = False
+                site['is_infinite_autonomy'] = True
+
+        # --- Alertes ---
+        def _site_is_critical(site):
+            if site['is_infinite_consumption']:
+                return True
+            if site['autonomie_hours'] is not None:
+                return site['autonomie_hours'] <= self.AUTONOMY_CRITICAL_HOURS
+            return site['autonomy'] is not None and site['autonomy'] <= self.AUTONOMY_CRITICAL_THRESHOLD
 
         alerts = []
         for site in site_rows:
-            if site['autonomy'] is not None and site['autonomy'] <= 2.0:
+            if _site_is_critical(site):
+                if site['formatted_autonomy']:
+                    autonomy_text = f"Autonomie estimée à {site['formatted_autonomy']}"
+                else:
+                    autonomy_text = f"Autonomie estimée à {site['autonomy']} périodes"
                 alerts.append({
                     'id': f"site-{site['id']}",
                     'type': 'site_autonomy',
@@ -343,7 +571,7 @@ class DashboardOverviewAPIView(APIView):
                     'site_id': site['id'],
                     'site_name': site['site_name'],
                     'title': f"Site {site['site_name']} : autonomie critique",
-                    'subtitle': f"Autonomie estimée à {site['autonomy']} périodes avec une consommation moyenne de {site['avg_consumption']:.1f} L.",
+                    'subtitle': f"{autonomy_text} avec une consommation moyenne de {site['avg_consumption']:.1f} L.",
                 })
 
         for group in group_rows:
@@ -360,21 +588,24 @@ class DashboardOverviewAPIView(APIView):
                     'group_label': group['label'],
                     'site_name': group['site_name'],
                     'title': f"Groupe {group['label']} : consommation anormale",
-                    'subtitle': f"Écart de {sign}{abs(variance):.1f}% autour de la moyenne de consommation et {group['avg_consumption']:.1f} L en moyenne.",
+                    'subtitle': (
+                        f"Écart de {sign}{abs(variance):.1f}% entre la consommation horaire déduite "
+                        f"({group['mean_hourly_consumption_deduite']:.2f} L/h) et la consommation horaire réelle "
+                        f"({group['mean_hourly_consumption']:.2f} L/h). Consommation moyenne du groupe : "
+                        f"{group['avg_consumption']:.1f} L."
+                    ),
                 })
 
-        alerts.sort(key=lambda item: (item['priority_level'] != 'urgent', -item['priority_level'].count('urgent')))
+        priority_order = {'urgent': 0, 'warning': 1}
+        alerts.sort(key=lambda item: priority_order.get(item['priority_level'], 99))
 
         return Response({
-            'reports': [
-                {'id': report.id, 'label': self._report_label(report)}
-                for report in reports
-            ],
+            'reports': [{'id': r.id, 'label': self._report_label(r)} for r in reports],
             'summary': {
-                'critical_autonomy_sites': sum(1 for site in site_rows if site['autonomy'] is not None and site['autonomy'] <= 2.0),
-                'abnormal_consumption_groups': sum(1 for group in group_rows if group['is_abnormal']),
-                'total_consumption': round(sum(site['latest_consumption'] for site in site_rows), 1),
-                'total_runtime': round(sum(group['latest_hours'] for group in group_rows), 1),
+                'critical_autonomy_sites': sum(1 for s in site_rows if _site_is_critical(s)),
+                'abnormal_consumption_groups': sum(1 for g in group_rows if g['is_abnormal']),
+                'total_consumption': round(sum(s['latest_consumption'] for s in site_rows), 1),
+                'total_runtime': round(sum(g['latest_hours'] for g in group_rows), 1),
             },
             'sites': site_rows,
             'groups': group_rows,
@@ -401,167 +632,74 @@ class GroupesAPIView(APIView):
         site_choices = [{'id': site.id, 'nom_site': site.identifiant} for site in sites]
 
         selected_site_id = request.query_params.get('site_id')
-        if selected_site_id not in (None, ''):
-            selected_site_id = int(selected_site_id)
-        else:
-            selected_site_id = None
+        selected_site_id = int(selected_site_id) if selected_site_id not in (None, '') else None
 
+        report_ids = [r.id for r in reports]
+
+        # --- Bloc unique : charger TOUTES les lignes en une seule requête (élimine le N+1) ---
+        lignes_all = list(
+            LigneRapport.objects.filter(rapport_id__in=report_ids)
+            .select_related('cuve_journaliere')
+            .only(
+                'rapport_id', 'groupe_electrogene_id', 'cuve_principale_id',
+                'cuve_journaliere_id', 'cuve_journaliere__cuve_principale_id',
+                'quantite_gasoil_cuve_principale', 'quantite_gasoil_cuve_journaliere',
+                'depotage', 'compteur_horaire',
+            )
+        )
+
+        # --- Construction de group_primary_site_ids ---
         group_site_map = {}
-        for report in reports:
-            for line in LigneRapport.objects.filter(rapport=report):
-                if line.groupe_electrogene_id and line.cuve_principale_id:
-                    group_site_map.setdefault(line.groupe_electrogene_id, {})
-                    group_site_map[line.groupe_electrogene_id][line.cuve_principale_id] = (
-                        group_site_map[line.groupe_electrogene_id].get(line.cuve_principale_id, 0) + 1
-                    )
+        for line in lignes_all:
+            if line.groupe_electrogene_id and line.cuve_principale_id:
+                counts = group_site_map.setdefault(line.groupe_electrogene_id, {})
+                counts[line.cuve_principale_id] = counts.get(line.cuve_principale_id, 0) + 1
 
-        group_primary_site_ids = {}
-        for groupe in groupes:
-            counts = group_site_map.get(groupe.id, {})
-            if counts:
-                group_primary_site_ids[groupe.id] = max(counts.items(), key=lambda item: item[1])[0]
+        group_primary_site_ids = {
+            groupe.id: max(group_site_map[groupe.id].items(), key=lambda item: item[1])[0]
+            for groupe in groupes
+            if group_site_map.get(groupe.id)
+        }
 
-        site_report_state = {}
-        for site in sites:
-            previous_site_volume = None
-            for report in reports:
-                lines = LigneRapport.objects.filter(rapport=report, cuve_principale=site)
-                current_volume = 0.0
-                depotage_total = 0.0
-                for line in lines:
-                    current_volume += float(line.quantite_gasoil_cuve_principale or 0.0)
-                    current_volume += float(line.quantite_gasoil_cuve_journaliere or 0.0)
-                    depotage_total += float(line.depotage or 0.0)
+        # --- Indexation des lignes par (site_id, rapport_id) ---
+        lines_by_site_report = {}
+        for line in lignes_all:
+            site_ids = set()
+            if line.cuve_principale_id:
+                site_ids.add(line.cuve_principale_id)
+            if line.cuve_journaliere_id and line.cuve_journaliere and line.cuve_journaliere.cuve_principale_id:
+                site_ids.add(line.cuve_journaliere.cuve_principale_id)
+            for sid in site_ids:
+                lines_by_site_report.setdefault((sid, line.rapport_id), []).append(line)
 
-                if previous_site_volume is None:
-                    delta = 0.0
-                else:
-                    delta = max(0.0, previous_site_volume - current_volume + depotage_total)
+        site_report_state = calc.build_site_report_state(reports, sites, lines_by_site_report)
 
-                site_report_state[(site.id, report.id)] = {
-                    'current_volume': current_volume,
-                    'delta': delta,
-                }
-                previous_site_volume = current_volume
+        # (site_id, rapport_id) -> ids des groupes actifs sur ce site à ce rapport
+        groups_by_site_report = {}
+        for line in lignes_all:
+            if line.cuve_principale_id and line.groupe_electrogene_id:
+                groups_by_site_report.setdefault((line.cuve_principale_id, line.rapport_id), set()).add(
+                    line.groupe_electrogene_id
+                )
+        groupes_by_id = {g.id: g for g in groupes}
 
-        group_blocks = []
-        for groupe in groupes:
-            primary_site_id = group_primary_site_ids.get(groupe.id)
-            if selected_site_id is not None and primary_site_id != selected_site_id:
-                continue
+        # --- Grouper les lignes par (groupe, rapport) ---
+        lines_by_group_report = {}
+        for line in lignes_all:
+            if line.groupe_electrogene_id:
+                lines_by_group_report.setdefault((line.groupe_electrogene_id, line.rapport_id), []).append(line)
 
-            hours_run = []
-            consumption = []
-            volume = []
-            previous_counter = None
-            previous_volume = None
-
-            for report in reports:
-                lines = LigneRapport.objects.filter(rapport=report, groupe_electrogene=groupe)
-                if primary_site_id is not None:
-                    lines = lines.filter(cuve_principale_id=primary_site_id)
-
-                report_counter = 0.0
-                report_volume = 0.0
-                report_consumption = 0.0
-                report_hours = 0.0
-
-                for line in lines:
-                    if line.compteur_horaire is not None:
-                        report_counter = max(report_counter, float(line.compteur_horaire))
-
-                    if line.quantite_gasoil_cuve_principale is not None:
-                        report_volume += float(line.quantite_gasoil_cuve_principale)
-                    if line.quantite_gasoil_cuve_journaliere is not None:
-                        report_volume += float(line.quantite_gasoil_cuve_journaliere)
-
-                    if line.depotage is not None:
-                        report_consumption += float(line.depotage)
-
-                    if line.compteur_horaire is not None:
-                        report_hours += float(line.compteur_horaire)
-
-                if previous_counter is None:
-                    hour_delta = 0.0
-                else:
-                    hour_delta = max(0.0, report_counter - previous_counter)
-
-                hours_run.append(round(hour_delta, 1))
-                previous_counter = report_counter
-
-                site_state = site_report_state.get((primary_site_id, report.id), {}) if primary_site_id is not None else {}
-                site_current_volume = float(site_state.get('current_volume', 0.0) or 0.0)
-                site_delta = float(site_state.get('delta', 0.0) or 0.0)
-
-                report_groups = []
-                if primary_site_id is not None:
-                    report_groups = list(
-                        GroupeElectrogene.objects.filter(
-                            lignes_rapport__rapport=report,
-                            lignes_rapport__cuve_principale_id=primary_site_id,
-                        ).distinct()
-                    )
-
-                total_power = sum(self._extract_power_value(group.puissance) for group in report_groups)
-                group_share = 0.0
-                if total_power > 0:
-                    group_share = self._extract_power_value(groupe.puissance) / total_power
-                elif report_groups:
-                    group_share = 1.0 / len(report_groups)
-                else:
-                    group_share = 1.0
-
-                weighted_report_volume = round(site_current_volume * group_share, 1)
-                weighted_report_delta = round(site_delta * group_share, 1)
-
-                if previous_volume is None:
-                    volume_value = weighted_report_volume
-                else:
-                    volume_value = round(previous_volume + weighted_report_delta, 1)
-
-                volume.append(volume_value)
-                previous_volume = volume_value
-
-                consumption.append(round(weighted_report_volume, 1))
-
-            mean_hourly_consumption = 0.0
-            if hours_run:
-                positive_hours = [value for value in hours_run if value > 0]
-                if positive_hours:
-                    mean_hourly_consumption = sum(consumption) / sum(positive_hours) if sum(positive_hours) else 0.0
-
-            main_tank_capacity = 0.0
-            daily_tank_capacity = 0.0
-            if primary_site_id is not None:
-                main_tank = CuvePrincipale.objects.filter(id=primary_site_id).first()
-                if main_tank:
-                    main_tank_capacity = float(main_tank.capacite or 0.0)
-                daily_tank = CuveJournaliere.objects.filter(cuve_principale_id=primary_site_id).order_by('id').first()
-                if daily_tank:
-                    daily_tank_capacity = float(daily_tank.capacite or 0.0)
-
-            absolute_mean_consumption = 0.0
-            if consumption:
-                absolute_mean_consumption = sum(consumption) / len(consumption)
-
-            autonomy_hours = 0.0
-            if absolute_mean_consumption > 0:
-                autonomy_hours += main_tank_capacity / absolute_mean_consumption
-                if daily_tank_capacity > 0:
-                    autonomy_hours += daily_tank_capacity / absolute_mean_consumption
-
-            group_blocks.append({
-                'id': groupe.id,
-                'label': f"G#{groupe.id} ({groupe.marque} {groupe.puissance})",
-                'site_id': primary_site_id,
-                'site_nom': next((site.identifiant for site in sites if site.id == primary_site_id), ''),
-                'hours_run': hours_run,
-                'consumption': consumption,
-                'volume': volume,
-                'mean_hourly_consumption': round(mean_hourly_consumption, 3),
-                'autonomie_hours': round(autonomy_hours, 1),
-                'color': '#0b3d7a',
-            })
+        group_blocks = calc.calculer_groupes(
+            reports=reports,
+            groupes=groupes,
+            sites=sites,
+            lines_by_group_report=lines_by_group_report,
+            site_report_state=site_report_state,
+            groups_by_site_report=groups_by_site_report,
+            groupes_by_id=groupes_by_id,
+            group_primary_site_ids=group_primary_site_ids,
+            selected_site_id=selected_site_id,
+        )
 
         return Response({
             'labels': labels,

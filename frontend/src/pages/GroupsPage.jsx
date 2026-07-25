@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
-import { authFetch } from '../auth.js'
+import { apiFetch } from '../auth.js'
+import { formatAutonomy } from '../utils/format.js'
 
 const buildDerivedMetric = (values = []) => {
   const normalizedValues = (values || []).map((value) => (typeof value === 'number' ? value : 0)).filter((value) => value > 0)
@@ -58,6 +59,7 @@ const renderMeanDelta = (metric, suffix = '') => {
   return <small className={deltaClass}>{deltaValue}{suffix}</small>
 }
 
+
 function GroupsPage({ onNavigate }) {
   const chartPalette = useMemo(() => ({ text: '#23466d', grid: 'rgba(11, 61, 122, 0.08)' }), [])
   const [groupsData, setGroupsData] = useState(null)
@@ -67,7 +69,11 @@ function GroupsPage({ onNavigate }) {
   const queryGroupId = useMemo(() => new URLSearchParams(window.location.search).get('groupId'), [])
   const queryGroupLabel = useMemo(() => new URLSearchParams(window.location.search).get('groupLabel'), [])
   const queryMode = useMemo(() => new URLSearchParams(window.location.search).get('mode'), [])
-  const [mode, setMode] = useState(queryMode || 'details')
+  // Par défaut : vue globale (tous les groupes, tous les sites) si on arrive sans
+  // option (pas de groupId dans l'URL). Si on arrive via un lien qui cible un
+  // groupe précis (queryGroupId présent, ex. depuis une alerte du Dashboard), on
+  // garde le comportement existant : vue détail sur ce groupe.
+  const [mode, setMode] = useState(queryMode || (queryGroupId ? 'details' : 'all'))
 
   const reportChoices = useMemo(() => (groupsData?.rapport_choices || groupsData?.report_choices || []), [groupsData])
   const rapportDebutIndex = useMemo(() => {
@@ -89,19 +95,14 @@ function GroupsPage({ onNavigate }) {
 
   const loadGroupsData = async (queryParams = '', options = {}) => {
     try {
-      const response = await authFetch(`/api/v1/dashboard/groupes${queryParams ? `?${queryParams}` : ''}`)
-      if (!response.ok) {
-        throw new Error(`Backend error ${response.status}`)
-      }
-      const data = await response.json()
+      const data = await apiFetch(`/api/v1/dashboard/groupes${queryParams ? `?${queryParams}` : ''}`)
       const choices = data.rapport_choices || data.report_choices || []
       const normalizedBlocks = (data.group_blocks || []).map((block) => ({
         ...block,
         hours: buildDerivedMetric(block.hours_run || []),
-        consumption_stats: buildDerivedMetric(block.consumption || block.consommation || []),
+        consumption_stats: buildDerivedMetric(block.consumption || []),
         volume_stats: buildDerivedMetric(block.volume || []),
         rate: block.mean_hourly_consumption != null ? block.mean_hourly_consumption : null,
-        autonomie_hours: block.hours_run?.length ? (block.hours_run.reduce((sum, value) => sum + (Number(value) || 0), 0) || 0) : 0,
       }))
 
       setGroupsData({
@@ -114,7 +115,7 @@ function GroupsPage({ onNavigate }) {
         setSiteId(data.selected_site_id != null ? String(data.selected_site_id) : '')
       }
     } catch (error) {
-      console.warn('Groups backend unavailable, using demo fallback data.', error)
+      console.warn('Groups backend unavailable:', error)
     }
   }
 
@@ -157,10 +158,10 @@ function GroupsPage({ onNavigate }) {
       }
 
       makeChart(`chart-group-${block.id}-hours`, 'line', block.hours_run || [], true, block.label, block.color || '#0b3d7a')
-      makeChart(`chart-group-${block.id}-consumption`, 'bar', block.consumption || block.consommation || [], false, 'Consommation', block.color || '#0b3d7a')
+      makeChart(`chart-group-${block.id}-consumption`, 'bar', block.consumption || [], false, 'Consommation', block.color || '#0b3d7a')
       const hourlyValues = (block.hours_run || []).map((hours, index) => {
         const hoursValue = safeValue(hours)
-        const consumptionValue = safeValue((block.consumption || block.consommation || [])[index])
+        const consumptionValue = safeValue((block.consumption || [])[index])
         return hoursValue > 0 ? Number((consumptionValue / hoursValue).toFixed(2)) : 0
       })
       makeChart(`chart-group-${block.id}-hourly-consumption`, 'line', hourlyValues, true, 'Consommation horaire', block.color || '#0b3d7a')
@@ -190,19 +191,9 @@ function GroupsPage({ onNavigate }) {
   }, [groupsData, siteId])
 
   const siteConsumption = useMemo(() => {
-    const filtered = (groupsData?.group_blocks || []).filter((block) => !siteId || String(block.site_id) === String(siteId))
-    const values = filtered.flatMap((block) => block.consumption || [])
+    const values = (groupsData?.group_blocks || []).flatMap((block) => block.consumption || [])
     return buildDerivedMetric(values)
-  }, [groupsData, siteId])
-
-  const applyFilters = async (event) => {
-    const params = new URLSearchParams()
-    if (rapportDebut) params.set('rapport_debut', rapportDebut)
-    if (rapportFin) params.set('rapport_fin', rapportFin)
-    if (siteId) params.set('site_id', siteId)
-    if (mode) params.set('mode', mode)
-    await loadGroupsData(params.toString())
-  }
+  }, [groupsData])
 
   if (!groupsData) {
     return (
@@ -249,8 +240,8 @@ function GroupsPage({ onNavigate }) {
           <div className="filter-field">
             <label htmlFor="view_mode">Vue</label>
             <select id="view_mode" value={mode} onChange={(event) => setMode(event.target.value)}>
-              <option value="details">Détails</option>
               <option value="all">Global</option>
+              <option value="details">Detail</option>
             </select>
           </div>
         </div>
@@ -313,7 +304,7 @@ function GroupsPage({ onNavigate }) {
                           <td>{siteName}</td>
                           <td>{g.hours?.mean?.toFixed(1) ?? '—'}</td>
                           <td>{g.consumption_stats?.mean?.toFixed(1) ?? '—'}</td>
-                          <td>{g.autonomie_hours != null ? `${g.autonomie_hours.toFixed(1)} h` : '—'}</td>
+                          <td>{g.is_infinite_consumption ? '0h' : (g.is_infinite_autonomy || g.formatted_autonomy === '∞' ? '∞' : (g.formatted_autonomy ? g.formatted_autonomy : (g.autonomie_hours != null ? formatAutonomy(g.autonomie_hours) : '—')))}</td>
                         </tr>
                       )
                     })}
@@ -328,8 +319,27 @@ function GroupsPage({ onNavigate }) {
               return true
             }).map((group) => (
             <article key={group.id} className="group-card" style={{ position: 'relative', borderLeft: `4px solid ${group.color || '#0b3d7a'}` }}>
-              <div style={{ position: 'absolute', top: '1rem', right: '1rem', backgroundColor: '#fde047', color: '#0b3d91', padding: '0.6rem 0.9rem', borderRadius: '999px', fontWeight: 700, boxShadow: '0 12px 20px rgba(0,0,0,0.08)', zIndex: 1 }}>
-                Autonomie {group.autonomie_hours != null ? `${group.autonomie_hours.toFixed(1)} h` : '—'}
+              {/* Autonomie badge with colour coding */}
+              <div style={{
+                position: 'absolute',
+                top: '1rem',
+                right: '1rem',
+                backgroundColor: (() => {
+                  if (group.is_infinite_consumption) return '#ef4444'; // red for 0h / critical alert
+                  if (group.is_infinite_autonomy || group.formatted_autonomy === '∞') return '#6b7280'; // gray for ∞
+                  const hrs = group.autonomie_hours ?? 0;
+                  if (hrs >= 72) return '#10b981'; // green ≥3 jours
+                  if (hrs >= 36) return '#fbbf24'; // yellow ≥1.5 jours
+                  return '#ef4444'; // red <36h
+                })(),
+                color: '#fff',
+                padding: '0.6rem 0.9rem',
+                borderRadius: '999px',
+                fontWeight: 700,
+                boxShadow: '0 12px 20px rgba(0,0,0,0.08)',
+                zIndex: 1,
+              }}>
+                {group.is_infinite_consumption ? '0h' : (group.is_infinite_autonomy || group.formatted_autonomy === '∞' ? '∞' : (group.formatted_autonomy ? group.formatted_autonomy : (group.autonomie_hours != null ? formatAutonomy(group.autonomie_hours) : '—')))}
               </div>
               <div className="group-card-head">
                 <span className="metric-label">Groupe</span>
@@ -337,7 +347,13 @@ function GroupsPage({ onNavigate }) {
                 { (group.site_nom || selectedSite?.nom_site) ? (
                   <p className="group-header-meta">{group.site_nom || selectedSite?.nom_site}</p>
                 ) : null }
-                <p className="group-header-meta">{group.rate?.toFixed(1) ?? '—'} L/h — {group.marque || ''} {group.puissance || ''}</p>
+
+                {group.latest_main_volume != null && (
+                  <p className="group-header-meta">Cuve principale: {group.latest_main_volume} L</p>
+                )}
+                {group.latest_daily_volume != null && (
+                  <p className="group-header-meta">Cuve journalière: {group.latest_daily_volume} L</p>
+                )}
               </div>
 
               <div className="group-metric-grid">
@@ -391,62 +407,35 @@ function GroupsPage({ onNavigate }) {
 
                 <div className="metric-stat-block">
                   <span className="curve-title">Consommation horaire</span>
-                  <div className="group-stats">
-                    <div>
-                      <span>Total période</span>
-                      <strong>{(() => {
-                        const hourlyMetric = buildDerivedMetric((group.hours_run || []).map((hours, index) => {
-                          const hoursValue = safeValue(hours)
-                          const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
-                          return hoursValue > 0 ? consumptionValue / hoursValue : 0
-                        }))
-                        return `${hourlyMetric.total.toFixed(1)} L/h`
-                      })()}</strong>
-                      {renderDelta(buildDerivedMetric((group.hours_run || []).map((hours, index) => {
-                        const hoursValue = safeValue(hours)
-                        const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
-                        return hoursValue > 0 ? consumptionValue / hoursValue : 0
-                      })))}
-                    </div>
-                    <div>
-                      <span>Moyenne</span>
-                      <strong>{(() => {
-                        const hourlyMetric = buildDerivedMetric((group.hours_run || []).map((hours, index) => {
-                          const hoursValue = safeValue(hours)
-                          const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
-                          return hoursValue > 0 ? consumptionValue / hoursValue : 0
-                        }))
-                        return `${hourlyMetric.mean.toFixed(1)} L/h`
-                      })()}</strong>
-                      {renderMeanDelta(buildDerivedMetric((group.hours_run || []).map((hours, index) => {
-                        const hoursValue = safeValue(hours)
-                        const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
-                        return hoursValue > 0 ? consumptionValue / hoursValue : 0
-                      })))}
-                    </div>
-                    <div>
-                      <span>Moy. absolue</span>
-                      <strong>{(() => {
-                        const hourlyMetric = buildDerivedMetric((group.hours_run || []).map((hours, index) => {
-                          const hoursValue = safeValue(hours)
-                          const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
-                          return hoursValue > 0 ? consumptionValue / hoursValue : 0
-                        }))
-                        return `${hourlyMetric.all_time_mean.toFixed(1)} L/h`
-                      })()}</strong>
-                    </div>
-                    <div>
-                      <span>Écart type</span>
-                      <strong>{(() => {
-                        const hourlyMetric = buildDerivedMetric((group.hours_run || []).map((hours, index) => {
-                          const hoursValue = safeValue(hours)
-                          const consumptionValue = safeValue((group.consumption || group.consommation || [])[index])
-                          return hoursValue > 0 ? consumptionValue / hoursValue : 0
-                        }))
-                        return `${hourlyMetric.all_time_stddev.toFixed(1)} L/h`
-                      })()}</strong>
-                    </div>
-                  </div>
+                  {(() => {
+                    const hourlyMetric = buildDerivedMetric((group.hours_run || []).map((hours, index) => {
+                      const hoursValue = safeValue(hours)
+                      const consumptionValue = safeValue((group.consumption || [])[index])
+                      return hoursValue > 0 ? Number((consumptionValue / hoursValue).toFixed(2)) : 0
+                    }))
+                    return (
+                      <div className="group-stats">
+                        <div>
+                          <span>Total période</span>
+                          <strong>{hourlyMetric.total.toFixed(1)} L/h</strong>
+                          {renderDelta(hourlyMetric)}
+                        </div>
+                        <div>
+                          <span>Moyenne</span>
+                          <strong>{hourlyMetric.mean.toFixed(1)} L/h</strong>
+                          {renderMeanDelta(hourlyMetric)}
+                        </div>
+                        <div>
+                          <span>Moy. absolue</span>
+                          <strong>{hourlyMetric.all_time_mean.toFixed(1)} L/h</strong>
+                        </div>
+                        <div>
+                          <span>Écart type</span>
+                          <strong>{hourlyMetric.all_time_stddev.toFixed(1)} L/h</strong>
+                        </div>
+                      </div>
+                    )
+                  })()}
                 </div>
               </div>
 
