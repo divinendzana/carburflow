@@ -226,7 +226,7 @@ def import_report_rows(rows: list[dict], user) -> tuple[Rapport, int]:
             rapport=rapport,
             cuve_principale=cuve_principale,
             cuve_journaliere=cuve_journaliere,
-            groupe=groupe,
+            groupe_electrogene=groupe,
             quantite_gasoil_cuve_principale=_to_float(row.get('quantite_gasoil_cuve_principale')),
             quantite_gasoil_cuve_journaliere=_to_float(row.get('quantite_gasoil_cuve_journaliere')),
             compteur_horaire=_to_float(row.get('compteur_horaire')),

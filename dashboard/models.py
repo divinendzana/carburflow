@@ -82,6 +82,13 @@ class CuveJournaliere(models.Model):
 class Rapport(models.Model):
     date_debut = models.DateField(verbose_name='Date de début')
     date_fin = models.DateField(verbose_name='Date de fin')
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        verbose_name='Créé par',
+    )
 
     class Meta:
         verbose_name = 'Rapport'
