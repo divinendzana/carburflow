@@ -98,13 +98,11 @@ function DashboardPage({ onNavigate }) {
     )
   }
 
-  // Écart pour "Groupes les plus gourmands" : (dernière conso - moyenne) / dernière
-  // conso — relatif à la dernière valeur, pas à la moyenne (contrairement à
-  // getDeviation/renderDeviation utilisés ailleurs). Flèche bas quand la dernière
-  // conso est en retrait par rapport à la moyenne du groupe.
-  const renderConsumptionGapVsLatest = (latest, avg, fallback = '—') => {
-    if (latest == null || avg == null || latest === 0) return fallback
-    const gapPct = Number((((latest - avg) / latest) * 100).toFixed(1))
+  // Écart pour "Groupes les plus gourmands" : (dernière conso - moyenne) / moyenne
+  // En relatif à la moyenne — positif = dernière conso > moyenne, négatif = en dessous.
+  const renderConsumptionGapVsAvg = (latest, avg, fallback = '—') => {
+    if (latest == null || avg == null || avg === 0) return fallback
+    const gapPct = Number((((latest - avg) / avg) * 100).toFixed(1))
     const isNegative = gapPct < 0
     return (
       <span className={`deviation-cell ${isNegative ? 'negative' : 'positive'}`}>
@@ -251,19 +249,18 @@ function DashboardPage({ onNavigate }) {
     ]
   }, [dashboardData, groupRows, siteRows, siteAverageConsumption])
 
-  // 1. Sites à faible autonomie (inclut 0h — pas de données de consommation sur le
-  // groupe rattaché, donc autonomie potentiellement nulle ; exclut seulement ∞,
-  // qui signifie une absence totale de données)
+  // 1. Sites avec autonomie — tous, triés par ordre croissant (les plus urgents en premier)
+  // 0h (consommation sans heures) passe en tête, ∞ (pas de données) est exclu
   const lowAutonomySiteRows = useMemo(() => {
     if (!siteRows.length) return []
     return [...siteRows]
       .filter((s) => {
-        // Exclure les sites avec autonomie infinie (∞ = aucune donnée)
+        // Exclure les sites sans aucune donnée (∞)
         if (s.is_infinite_autonomy) return false
         // Garder les 0h (consommation avérée sans heures)
         if (s.is_infinite_consumption) return true
-        // Garder les sites avec une autonomie finie sous le seuil
-        return s.autonomie_hours != null && s.autonomie_hours < 36
+        // Garder tous les sites avec une autonomie finie
+        return s.autonomie_hours != null
       })
       // 0h passe en tête (pire cas), puis tri croissant par autonomie
       .sort((a, b) => {
@@ -271,7 +268,7 @@ function DashboardPage({ onNavigate }) {
         const bKey = b.is_infinite_consumption ? -1 : (b.autonomie_hours ?? 999)
         return aKey - bKey
       })
-      .slice(0, 6)
+      .slice(0, 8)
   }, [siteRows])
 
   // 2. Groupes à consommation anormale
@@ -289,7 +286,6 @@ function DashboardPage({ onNavigate }) {
       .sort((a, b) => b.avg_consumption - a.avg_consumption)
       .slice(0, 6)
   }, [groupRows])
-
   // 4. Sites les plus gourmands (avec colonnes simplifiées)
   const topConsumerSiteRows = useMemo(() => {
     if (!siteRows.length) return []
@@ -299,41 +295,34 @@ function DashboardPage({ onNavigate }) {
   }, [siteRows])
 
   const alertItems = useMemo(() => {
-    // Créer des alertes pour les sites avec 0h (consommation sans heures)
-    const siteAlerts = siteRows
-      .map((site) => {
-        // Seulement pour les sites avec 0h
-        if (!site.is_infinite_consumption) return null
-        
-        const title = `Site ${site.site_name} : consommation sans delta horaire`
-        const subtitle = `Consommation détectée sans delta horaire — consommation moyenne ${site.avg_consumption} L.`
-        
-        return {
-          id: `site-anormal-${site.id}`,
-          type: 'anormal',
-          target: 'site',
-          priority: 'Moyen',
-          priority_level: 'medium',
-          severity: 'medium',
-          site_id: site.id,
-          site_name: site.site_name,
-          title,
-          subtitle,
-          is_infinite_consumption: true,
-        }
-      })
-      .filter(Boolean)
-
-    // Créer des alertes pour les sites avec autonomie critique (<24h) et faible (24-36h)
+    // --- CAS 1 : Sites à autonomie critique ---
+    // Sites avec autonomie finie < 24h (critique), 24-36h (à surveiller)
+    // et sites avec consommation mais 0h de delta (is_infinite_consumption)
     const autonomyAlerts = siteRows
-      .map((site) => {
-        // Ignorer ∞ et 0h
-        if (site.is_infinite_autonomy) return null
-        if (site.is_infinite_consumption) return null
-        if (site.autonomie_hours == null) return null
-        
+      .flatMap((site) => {
+        if (site.is_infinite_autonomy) return []
+
+        // Cas 0h : consommation sans delta horaire = critique immédiat
+        if (site.is_infinite_consumption) {
+          return [{
+            id: `site-critique-0h-${site.id}`,
+            type: 'critique',
+            target: 'site',
+            priority: 'Critique',
+            priority_level: 'critical',
+            severity: 'critical',
+            site_id: site.id,
+            site_name: site.site_name,
+            title: `Site ${site.site_name} — autonomie critique : 0 h`,
+            subtitle: `Consommation de carburant détectée (moy. ${site.avg_consumption.toFixed(1)} L) mais aucun delta horaire enregistré — temps restant indéterminé, agir immédiatement.`,
+            is_infinite_consumption: true,
+          }]
+        }
+
+        if (site.autonomie_hours == null) return []
+
         if (site.autonomie_hours < 24) {
-          return {
+          return [{
             id: `site-critique-${site.id}`,
             type: 'critique',
             target: 'site',
@@ -342,60 +331,100 @@ function DashboardPage({ onNavigate }) {
             severity: 'critical',
             site_id: site.id,
             site_name: site.site_name,
-            title: `Site ${site.site_name} : temps restant critique`,
-            subtitle: `Temps restant : ${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)} — consommation moyenne ${site.avg_consumption} L.`,
+            title: `Site ${site.site_name} — autonomie critique : ${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)}`,
+            subtitle: `Moins de 24 h de carburant restant. Stock actuel : ${site.latest_volume.toFixed(0)} L — consommation moyenne : ${site.avg_consumption.toFixed(1)} L/semaine. Réapprovisionner de toute urgence.`,
             is_infinite_consumption: false,
-          }
+          }]
         }
-        
+
         if (site.autonomie_hours < 36) {
-          return {
+          return [{
             id: `site-faible-${site.id}`,
             type: 'alerte',
             target: 'site',
-            priority: 'Faible',
-            priority_level: 'low',
-            severity: 'low',
+            priority: 'À surveiller',
+            priority_level: 'medium',
+            severity: 'medium',
             site_id: site.id,
             site_name: site.site_name,
-            title: `Site ${site.site_name} : temps restant à surveiller`,
-            subtitle: `Temps restant : ${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)} — consommation moyenne ${site.avg_consumption} L.`,
+            title: `Site ${site.site_name} — autonomie faible : ${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)}`,
+            subtitle: `Entre 24 h et 36 h de carburant restant. Stock actuel : ${site.latest_volume.toFixed(0)} L — consommation moyenne : ${site.avg_consumption.toFixed(1)} L/semaine. Planifier un réapprovisionnement.`,
             is_infinite_consumption: false,
-          }
+          }]
         }
-        
-        return null
-      })
-      .filter(Boolean)
 
-    // Garder les alertes existantes pour les groupes — le subtitle vient déjà du
-    // backend avec le même écart que celui affiché dans le tableau "consommation
-    // anormale" (déduite vs réellement évaluée) ; pas de recalcul ici, pour éviter
-    // que la notification et le tableau divergent.
-    const groupAlerts = (dashboardData?.alerts || [])
-      .filter((alert) => alert.target === 'groups')
-      .map((alert) => {
-        const sev = normalizeAlertSeverity(alert)
-        return {
-          ...alert,
-          priority: sev.label,
-          priority_level: sev.level,
-          severity: sev.level,
-        }
+        return []
       })
 
-    const combined = [...siteAlerts, ...autonomyAlerts, ...groupAlerts]
-      .map((alert) => {
-        if (alert.severity) return alert
-        const sev = normalizeAlertSeverity(alert)
+    // --- CAS 2 : Groupes avec delta horaire mais sans consommation horaire calculable ---
+    // Le groupe a tourné (avg_hours > 0) mais pas de consommation associée
+    const groupWithHoursNoConsumption = groupRows
+      .filter((g) => !g.is_infinite_autonomy && !g.is_infinite_consumption && g.avg_hours > 0 && g.mean_hourly_consumption === 0)
+      .map((g) => ({
+        id: `group-hours-no-cons-${g.id}`,
+        type: 'anomalie',
+        target: 'groups',
+        priority: 'À surveiller',
+        priority_level: 'medium',
+        severity: 'medium',
+        group_id: g.id,
+        group_label: g.label,
+        site_name: g.site_name,
+        title: `Groupe ${g.label} — delta horaire sans consommation horaire`,
+        subtitle: `Delta horaire moyen : ${g.avg_hours.toFixed(1)} h — mais aucune consommation horaire calculable (consommation totale nulle sur la période). Vérifier les relevés de carburant associés.`,
+        is_infinite_consumption: false,
+      }))
+
+    // --- CAS 3 : Groupes sans delta horaire mais avec consommation (n'ont pas fonctionné mais ont consommé) ---
+    // is_infinite_consumption == true : consommation détectée mais 0 h de fonctionnement enregistrée
+    const groupWithConsNoHours = groupRows
+      .filter((g) => g.is_infinite_consumption)
+      .map((g) => ({
+        id: `group-cons-no-hours-${g.id}`,
+        type: 'anomalie',
+        target: 'groups',
+        priority: 'Urgent',
+        priority_level: 'critical',
+        severity: 'critical',
+        group_id: g.id,
+        group_label: g.label,
+        site_name: g.site_name,
+        title: `Groupe ${g.label} — consommation sans fonctionnement enregistré`,
+        subtitle: `Consommation moyenne de ${g.avg_consumption.toFixed(1)} L détectée mais aucun delta horaire (0 h). Le groupe a consommé du carburant sans heures de fonctionnement enregistrées — vérifier le compteur ou les saisies.`,
+        is_infinite_consumption: true,
+      }))
+
+    // --- CAS 4 : Groupes avec écart > 15% de consommation horaire semaine N vs moyenne ---
+    const SEUIL_ECART = 15.0
+    const groupWithHighVariance = groupRows
+      .filter((g) => {
+        if (g.latest_hourly_consumption == null) return false
+        if (!g.mean_hourly_consumption_deduite || g.mean_hourly_consumption_deduite === 0) return false
+        const ecart = Math.abs((g.latest_hourly_consumption - g.mean_hourly_consumption_deduite) / g.mean_hourly_consumption_deduite) * 100
+        return ecart > SEUIL_ECART
+      })
+      .map((g) => {
+        const ecart = ((g.latest_hourly_consumption - g.mean_hourly_consumption_deduite) / g.mean_hourly_consumption_deduite) * 100
+        const sign = ecart >= 0 ? '▲' : '▼'
+        const absEcart = Math.abs(ecart).toFixed(1)
         return {
-          ...alert,
-          priority: sev.label,
-          priority_level: sev.level,
-          severity: sev.level,
+          id: `group-variance-${g.id}`,
+          type: 'ecart',
+          target: 'groups',
+          priority: 'À surveiller',
+          priority_level: 'medium',
+          severity: 'medium',
+          group_id: g.id,
+          group_label: g.label,
+          site_name: g.site_name,
+          title: `Groupe ${g.label} — écart consommation horaire ${sign}${absEcart}% (semaine N)`,
+          subtitle: `Semaine N : ${g.latest_hourly_consumption.toFixed(2)} L/h — Moyenne habituelle : ${g.mean_hourly_consumption_deduite.toFixed(2)} L/h — Écart ${sign}${absEcart}% (seuil : ${SEUIL_ECART}%). Vérifier le fonctionnement du groupe.`,
+          is_infinite_consumption: false,
         }
       })
-    
+
+    const combined = [...autonomyAlerts, ...groupWithConsNoHours, ...groupWithHoursNoConsumption, ...groupWithHighVariance]
+
     return combined.sort((a, b) => {
       const rank = { critical: 3, medium: 2, low: 1 }
       return (rank[b.severity] || 0) - (rank[a.severity] || 0)
@@ -409,16 +438,15 @@ function DashboardPage({ onNavigate }) {
     low: alerts.filter((a) => a.severity === 'low').length,
   }), [alerts])
 
-  const renderAlertSubtitle = (subtitle) => {
+  const renderAlertSubtitle = (subtitle, alertType) => {
     if (!subtitle) return null
-    // Polarité de couleur : pour l'autonomie, ▼ (moins d'heures) est le sens
-    // défavorable ; pour l'écart de consommation groupe (déduite vs réellement
-    // évaluée), c'est ▲ (déduite > réelle, carburant manquant non expliqué par le
-    // fonctionnement du groupe) qui est défavorable — l'inverse.
-    const isConsumptionGap = subtitle.includes('Écart de')
-    const parts = subtitle.split(/(▲[\d.]+%|▼[\d.]+%)/)
+    // Colorisation des flèches ▲/▼ selon la polarité :
+    // - pour les écarts de consommation horaire (type 'ecart'), ▲ = mauvais (sur-consommation)
+    // - pour les autres cas, la couleur n'a pas d'importance fonctionnelle
+    const isConsumptionGap = alertType === 'ecart' || subtitle.includes('Écart de') || subtitle.includes('Écart ▲') || subtitle.includes('Écart ▼')
+    const parts = subtitle.split(/(▲[\d.,]+%|▼[\d.,]+%)/)
     return parts.map((part, i) => {
-      const arrowMatch = part.match(/^(▲|▼)([\d.]+%)$/)
+      const arrowMatch = part.match(/^(▲|▼)([\d.,]+%)$/)
       if (arrowMatch) {
         const arrowIsUp = arrowMatch[1] === '▲'
         const isBad = isConsumptionGap ? arrowIsUp : !arrowIsUp
@@ -588,7 +616,7 @@ function DashboardPage({ onNavigate }) {
                     <td style={{ textAlign: 'left' }}>{row.site_name || '—'}</td>
                     <td style={{ textAlign: 'right' }}><strong>{formatValue(row.avg_consumption, ' L')}</strong></td>
                     <td style={{ textAlign: 'right' }}>{formatValue(row.latest_consumption, ' L')}</td>
-                    <td style={{ textAlign: 'center' }}>{renderConsumptionGapVsLatest(row.latest_consumption, row.avg_consumption, '—')}</td>
+                    <td style={{ textAlign: 'center' }}>{renderConsumptionGapVsAvg(row.latest_consumption, row.avg_consumption, '—')}</td>
                   </tr>
                 ))}
                 {topConsumerGroupRows.length === 0 && (
@@ -693,7 +721,7 @@ function DashboardPage({ onNavigate }) {
                     {alert.is_infinite_consumption && (
                       <span className="alert-anomaly-prefix">Anomalie :</span>
                     )}
-                    {renderAlertSubtitle(alert.subtitle)}
+                    {renderAlertSubtitle(alert.subtitle, alert.type)}
                     <span
                       className="alert-more"
                       onClick={() => {

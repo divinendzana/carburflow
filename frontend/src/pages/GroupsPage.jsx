@@ -51,23 +51,30 @@ const formatMetric = (value, digits = 1) => (
   typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—'
 )
 
-/** Stats sur une série (semaine N / N-1 / total / moyenne). */
+/** Stats sur une série (semaine N / N-1 / total / moyenne).
+ * La moyenne est calculée sur les valeurs non nulles uniquement
+ * (consommation réelle = somme / nb de périodes avec consommation > 0).
+ */
 const buildPeriodSeriesStats = (values = []) => {
   const series = (values || []).map(safeNum)
   if (!series.length) {
     return { weekN: null, weekN1: null, total: null, mean: null }
   }
   const total = series.reduce((sum, value) => sum + value, 0)
+  const nonZeroCount = series.filter((v) => v > 0).length
   return {
     weekN: series[series.length - 1],
     weekN1: series.length > 1 ? series[series.length - 2] : null,
     total,
-    mean: total / series.length,
+    // Moyenne sur les périodes où on a eu une consommation réelle (non nulle)
+    mean: nonZeroCount > 0 ? total / nonZeroCount : 0,
   }
 }
 
 /**
  * Consommation horaire (L/h) sur les périodes où les heures sont non nulles (> 0).
+ * Retourne { mean: null, ... } si toutes les consommations horaires sont nulles
+ * => l'UI affichera "-L/h" plutôt que "0.00L/h".
  */
 const buildHourlyConsumptionStats = (hours = [], consumption = []) => {
   const rates = []
@@ -78,7 +85,8 @@ const buildHourlyConsumptionStats = (hours = [], consumption = []) => {
     rates.push(safeNum(consumption[index]) / hoursValue)
   }
   if (!rates.length) {
-    return { mean: null, max: null, min: null, stddev: null }
+    // Aucune heure non nulle -> on ne peut pas calculer de L/h, on signale null
+    return { mean: null, max: null, min: null, stddev: null, noData: true }
   }
   const mean = rates.reduce((sum, value) => sum + value, 0) / rates.length
   const variance = rates.reduce((sum, value) => sum + (value - mean) ** 2, 0) / rates.length
@@ -87,6 +95,7 @@ const buildHourlyConsumptionStats = (hours = [], consumption = []) => {
     max: Math.max(...rates),
     min: Math.min(...rates),
     stddev: Math.sqrt(variance),
+    noData: false,
   }
 }
 
@@ -467,24 +476,23 @@ function GroupsPage({ onNavigate }) {
                   return (
                     <>
                       <div className="metric-stat-block">
-                        <span className="curve-title">Consommation horaire</span>
-                        <p className="group-block-note">Sur les valeurs non nulles</p>
+                        <span className="curve-title">Delta horaire</span>
                         <div className="group-stats">
                           <div>
-                            <span>Consommation horaire moyenne</span>
-                            <strong>{formatMetric(hourlyStats.mean, 2)} L/h</strong>
+                            <span>Delta horaire dernière semaine (semaine N)</span>
+                            <strong>{formatMetric(hoursStats.weekN)} h</strong>
                           </div>
                           <div>
-                            <span>Consommation horaire max</span>
-                            <strong>{formatMetric(hourlyStats.max, 2)} L/h</strong>
+                            <span>Delta horaire avant-dernière semaine (semaine N-1)</span>
+                            <strong>{formatMetric(hoursStats.weekN1)} h</strong>
                           </div>
                           <div>
-                            <span>Consommation horaire min</span>
-                            <strong>{formatMetric(hourlyStats.min, 2)} L/h</strong>
+                            <span>Delta horaire total sur la période de la courbe</span>
+                            <strong>{formatMetric(hoursStats.total)} h</strong>
                           </div>
                           <div>
-                            <span>Écart-type</span>
-                            <strong>{formatMetric(hourlyStats.stddev, 2)} L/h</strong>
+                            <span>Delta horaire moyen</span>
+                            <strong>{formatMetric(hoursStats.mean)} h</strong>
                           </div>
                         </div>
                       </div>
@@ -512,26 +520,49 @@ function GroupsPage({ onNavigate }) {
                       </div>
 
                       <div className="metric-stat-block">
-                        <span className="curve-title">Delta horaire</span>
-                        <div className="group-stats">
-                          <div>
-                            <span>Delta horaire dernière semaine (semaine N)</span>
-                            <strong>{formatMetric(hoursStats.weekN)} h</strong>
+                        <span className="curve-title">Consommation horaire</span>
+                        <p className="group-block-note">Sur les valeurs non nulles</p>
+                        {hourlyStats.noData ? (
+                          <div className="group-stats">
+                            <div>
+                              <span>Consommation horaire moyenne</span>
+                              <strong style={{ color: 'var(--text-muted, #6b7280)' }}>-L/h</strong>
+                            </div>
+                            <div>
+                              <span>Consommation horaire max</span>
+                              <strong style={{ color: 'var(--text-muted, #6b7280)' }}>-L/h</strong>
+                            </div>
+                            <div>
+                              <span>Consommation horaire min</span>
+                              <strong style={{ color: 'var(--text-muted, #6b7280)' }}>-L/h</strong>
+                            </div>
+                            <div>
+                              <span>Écart-type</span>
+                              <strong style={{ color: 'var(--text-muted, #6b7280)' }}>-L/h</strong>
+                            </div>
                           </div>
-                          <div>
-                            <span>Delta horaire avant-dernière semaine (semaine N-1)</span>
-                            <strong>{formatMetric(hoursStats.weekN1)} h</strong>
+                        ) : (
+                          <div className="group-stats">
+                            <div>
+                              <span>Consommation horaire moyenne</span>
+                              <strong>{formatMetric(hourlyStats.mean, 2)} L/h</strong>
+                            </div>
+                            <div>
+                              <span>Consommation horaire max</span>
+                              <strong>{formatMetric(hourlyStats.max, 2)} L/h</strong>
+                            </div>
+                            <div>
+                              <span>Consommation horaire min</span>
+                              <strong>{formatMetric(hourlyStats.min, 2)} L/h</strong>
+                            </div>
+                            <div>
+                              <span>Écart-type</span>
+                              <strong>{formatMetric(hourlyStats.stddev, 2)} L/h</strong>
+                            </div>
                           </div>
-                          <div>
-                            <span>Delta horaire total sur la période de la courbe</span>
-                            <strong>{formatMetric(hoursStats.total)} h</strong>
-                          </div>
-                          <div>
-                            <span>Delta horaire moyen</span>
-                            <strong>{formatMetric(hoursStats.mean)} h</strong>
-                          </div>
-                        </div>
+                        )}
                       </div>
+
                     </>
                   )
                 })()}

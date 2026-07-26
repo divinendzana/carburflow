@@ -47,7 +47,6 @@ function Topbar({ activeView, onNavigate }) {
   const adminLinks = [
     { id: 'dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
     { id: 'sites', label: 'Sites', icon: MapPinned },
-    { id: 'cuves', label: 'Cuves', icon: Fuel },
     { id: 'groups', label: 'Groupes', icon: Zap },
     { id: 'reports', label: 'Relevés', icon: Upload },
   ]
