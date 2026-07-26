@@ -1,6 +1,5 @@
 import csv
 import io
-import re
 from datetime import datetime
 from pathlib import Path
 
@@ -66,7 +65,6 @@ class Command(BaseCommand):
             return []
         raw_bytes = path.read_bytes()
 
-        # Détection de l'encodage
         if raw_bytes.startswith(b'\xff\xfe') or raw_bytes.startswith(b'\xfe\xff'):
             text = raw_bytes.decode('utf-16')
         else:
@@ -78,30 +76,10 @@ class Command(BaseCommand):
             return []
 
         first_line = lines[0]
-        # Détection du délimiteur (tabulation en priorité, puis point-virgule, puis virgule)
         for delimiter in ['\t', ';', ',']:
             if delimiter in first_line:
                 return list(csv.DictReader(io.StringIO(text), delimiter=delimiter))
         return list(csv.DictReader(io.StringIO(text), delimiter=','))
-
-    def _resolve_cuve_principale(self, raw_value):
-        """Résout une CuvePrincipale par son id entier."""
-        pk = self._to_int(raw_value)
-        if pk is None:
-            return None
-        return CuvePrincipale.objects.filter(pk=pk).first()
-
-    def _resolve_cuve_journaliere(self, raw_value):
-        pk = self._to_int(raw_value)
-        if pk is None:
-            return None
-        return CuveJournaliere.objects.filter(pk=pk).first()
-
-    def _resolve_groupe(self, raw_value):
-        pk = self._to_int(raw_value)
-        if pk is None:
-            return None
-        return GroupeElectrogene.objects.filter(pk=pk).first()
 
     # ──────────────────────────────────────────────────────────────────────────
     # Arguments
@@ -126,12 +104,12 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.NOTICE(f"Importation depuis : {data_dir}"))
 
-        self._import_cuves_principales(data_dir / 'cuve_principale.csv')
+        cp_by_name = self._import_cuves_principales(data_dir / 'cuve_principale.csv')
         self._import_groupes(data_dir / 'groupe_electrogene.csv')
-        self._import_cuves_journalieres(data_dir / 'cuve_journaliere.csv')
-        self._import_lien_cj_groupe(data_dir / 'cuve_journaliere_groupe.csv')
+        cj_by_name = self._import_cuves_journalieres(data_dir / 'cuve_journaliere.csv', cp_by_name)
+        self._import_lien_cj_groupe(data_dir / 'cuve_journaliere_groupe.csv', cj_by_name)
         report_aliases = self._import_rapports(data_dir / 'rapport.csv')
-        self._import_lignes(data_dir / 'ligne_rapport.csv', report_aliases)
+        self._import_lignes(data_dir / 'ligne_rapport.csv', report_aliases, cp_by_name, cj_by_name)
 
         self.stdout.write(self.style.SUCCESS("🎉 Importation globale des CSV terminée avec succès !"))
 
@@ -141,30 +119,33 @@ class Command(BaseCommand):
 
     def _import_cuves_principales(self, path):
         """
-        CSV attendu : id_cuve_principale, capcite   (colonne id_site ignorée)
-        Exemple     : 1,s1,40000
+        CSV attendu : id_cuve_principale, capcite
+        id_cuve_principale est le nom réel du site (ex. "BEPANDA INTERNATIONAL"),
+        utilisé comme identifiant métier (champ `identifiant`).
+        Retourne un dict {nom_site: pk} pour les imports suivants.
         """
         rows = self._read_csv_rows(path)
         if not rows:
             self.stdout.write(self.style.WARNING(f"⚠ Fichier absent ou vide : {path.name}"))
-            return
+            return {}
 
+        cp_by_name = {}
         count = 0
         for row in rows:
-            cp_id = self._to_int(self._get_column(row, 'id_cuve_principale', 'id'))
-            if cp_id is None:
+            name = self._get_column(row, 'id_cuve_principale')
+            if not name:
                 continue
-            CuvePrincipale.objects.update_or_create(
-                id=cp_id,
+            name = name.strip()
+            obj, _ = CuvePrincipale.objects.update_or_create(
+                identifiant=name,
                 defaults={
-                    'identifiant': str(cp_id),
-                    'capacite': self._to_float(
-                        self._get_column(row, 'capcite', 'capacite', 'capacité', 'capacity')
-                    ),
+                    'capacite': self._to_float(self._get_column(row, 'capcite', 'capacite')),
                 },
             )
+            cp_by_name[name] = obj.pk
             count += 1
         self.stdout.write(self.style.SUCCESS(f"✔ cuve_principale.csv — {count} lignes importées"))
+        return cp_by_name
 
     def _import_groupes(self, path):
         """
@@ -178,56 +159,64 @@ class Command(BaseCommand):
 
         count = 0
         for row in rows:
-            g_id = self._to_int(self._get_column(row, 'id_groupe', 'id', 'id_groupe_electrogene'))
+            g_id = self._to_int(self._get_column(row, 'id_groupe'))
             if g_id is None:
                 continue
             GroupeElectrogene.objects.update_or_create(
                 id=g_id,
                 defaults={
                     'identifiant': str(g_id),
-                    'marque': self._get_column(row, 'marque_groupe', 'marque') or '',
-                    'puissance': str(
-                        self._get_column(row, 'puissance_groupe', 'puissance') or ''
-                    ),
-                    'compteur_horaire': self._to_float(
-                        self._get_column(row, 'compteur_horaire_groupe', 'compteur_horaire')
-                    ),
+                    'marque': self._get_column(row, 'marque_groupe') or '',
+                    'puissance': str(self._get_column(row, 'puissance_groupe') or ''),
+                    'compteur_horaire': self._to_float(self._get_column(row, 'compteur_horaire_groupe')),
                 },
             )
             count += 1
         self.stdout.write(self.style.SUCCESS(f"✔ groupe_electrogene.csv — {count} lignes importées"))
 
-    def _import_cuves_journalieres(self, path):
+    def _import_cuves_journalieres(self, path, cp_by_name):
         """
-        CSV attendu : id_cuve_journaliere,id_cuve_principale,capacite
+        CSV attendu : id_cuve_journaliere, id_cuve_principale, capacite
+        id_cuve_journaliere est le nom réel de la cuve journalière sur le terrain
+        (ex. "CT BONABERI 1"). Ce modèle n'a pas de champ identifiant propre : la
+        correspondance nom → pk est conservée en mémoire (dict) pour les imports
+        suivants (cuve_journaliere_groupe.csv, ligne_rapport.csv).
         """
         rows = self._read_csv_rows(path)
         if not rows:
             self.stdout.write(self.style.WARNING(f"⚠ Fichier absent ou vide : {path.name}"))
-            return
+            return {}
 
+        cj_by_name = {}
         count = 0
-        for row in rows:
-            cj_id = self._to_int(self._get_column(row, 'id_cuve_journaliere', 'id'))
-            cp_id = self._to_int(self._get_column(row, 'id_cuve_principale'))
-            if cj_id is None or cp_id is None:
+        for cj_id, row in enumerate(rows, start=1):
+            name = self._get_column(row, 'id_cuve_journaliere')
+            cp_name = self._get_column(row, 'id_cuve_principale')
+            if not name or not cp_name:
+                continue
+            name, cp_name = name.strip(), cp_name.strip()
+            cp_id = cp_by_name.get(cp_name)
+            if cp_id is None:
+                self.stdout.write(
+                    self.style.WARNING(f"  ↳ Cuve principale inconnue pour « {name} » : {cp_name}")
+                )
                 continue
             CuveJournaliere.objects.update_or_create(
                 id=cj_id,
                 defaults={
                     'cuve_principale_id': cp_id,
-                    'capacite': self._to_float(
-                        self._get_column(row, 'capacite', 'capcite', 'capacity')
-                    ),
+                    'capacite': self._to_float(self._get_column(row, 'capacite')),
                 },
             )
+            cj_by_name[name] = cj_id
             count += 1
         self.stdout.write(self.style.SUCCESS(f"✔ cuve_journaliere.csv — {count} lignes importées"))
+        return cj_by_name
 
-    def _import_lien_cj_groupe(self, path):
+    def _import_lien_cj_groupe(self, path, cj_by_name):
         """
-        CSV attendu : id_cuve_journaliere,id_groupe
-        Lie chaque CuveJournaliere à son GroupeElectrogene (OneToOne).
+        CSV attendu : id_cuve_journaliere, id_groupe
+        Lie chaque CuveJournaliere (résolue par nom) à son GroupeElectrogene (OneToOne).
         """
         rows = self._read_csv_rows(path)
         if not rows:
@@ -236,9 +225,13 @@ class Command(BaseCommand):
 
         count = 0
         for row in rows:
-            cj_id = self._to_int(self._get_column(row, 'id_cuve_journaliere', 'cj_id'))
-            g_id = self._to_int(self._get_column(row, 'id_groupe', 'groupe_id', 'id_groupe_electrogene'))
-            if cj_id is None or g_id is None:
+            cj_name = self._get_column(row, 'id_cuve_journaliere')
+            g_id = self._to_int(self._get_column(row, 'id_groupe'))
+            if not cj_name or g_id is None:
+                continue
+            cj_id = cj_by_name.get(cj_name.strip())
+            if cj_id is None:
+                self.stdout.write(self.style.WARNING(f"  ↳ Cuve journalière inconnue : {cj_name}"))
                 continue
             try:
                 cuve = CuveJournaliere.objects.get(id=cj_id)
@@ -246,15 +239,15 @@ class Command(BaseCommand):
                 cuve.groupe_electrogene = groupe
                 cuve.save(update_fields=['groupe_electrogene'])
                 count += 1
-            except (CuveJournaliere.DoesNotExist, GroupeElectrogene.DoesNotExist) as exc:
+            except GroupeElectrogene.DoesNotExist as exc:
                 self.stdout.write(
-                    self.style.WARNING(f"  ↳ Association ignorée CJ #{cj_id} ↔ Groupe #{g_id} : {exc}")
+                    self.style.WARNING(f"  ↳ Association ignorée CJ « {cj_name} » ↔ Groupe #{g_id} : {exc}")
                 )
         self.stdout.write(self.style.SUCCESS(f"✔ cuve_journaliere_groupe.csv — {count} associations établies"))
 
     def _import_rapports(self, path):
         """
-        CSV attendu : id_rapport,date_debut,date_fin
+        CSV attendu : id_rapport, date_debut, date_fin
         Retourne un dict {str(id_csv): db_id} pour les lignes de rapport.
         """
         rows = self._read_csv_rows(path)
@@ -264,37 +257,31 @@ class Command(BaseCommand):
 
         aliases = {}
         count = 0
-        report_index = 1
         for row in rows:
-            raw_id = self._get_column(row, 'id_rapport', 'id', 'rapport_id')
+            raw_id = self._get_column(row, 'id_rapport')
             r_id = self._to_int(raw_id)
             if r_id is None:
                 continue
             obj, _ = Rapport.objects.update_or_create(
                 id=r_id,
                 defaults={
-                    'date_debut': self._to_date(
-                        self._get_column(row, 'date_debut', 'date_debut_rapport')
-                    ),
-                    'date_fin': self._to_date(
-                        self._get_column(row, 'date_fin', 'date_fin_rapport')
-                    ),
+                    'date_debut': self._to_date(self._get_column(row, 'date_debut')),
+                    'date_fin': self._to_date(self._get_column(row, 'date_fin')),
                 },
             )
             aliases[str(raw_id)] = obj.id
-            aliases[str(r_id)] = obj.id
-            aliases[str(report_index)] = obj.id
-            report_index += 1
             count += 1
         self.stdout.write(self.style.SUCCESS(f"✔ rapport.csv — {count} rapports importés"))
         return aliases
 
-    def _import_lignes(self, path, report_aliases):
+    def _import_lignes(self, path, report_aliases, cp_by_name, cj_by_name):
         """
-        CSV attendu (UTF-16, tabulation) :
+        CSV attendu :
           id_ligne, id_rapport, id_cuve_principale, id_cuve_journaliere, id_groupe,
           quantités_cuve_principale, quantite_cuve_journaliere,
           depotage, compteur_horaire, état_fonctionnement, observations
+        id_cuve_principale et id_cuve_journaliere sont des noms de terrain,
+        résolus via les dicts construits lors des imports précédents.
         """
         rows = self._read_csv_rows(path)
         if not rows:
@@ -304,59 +291,35 @@ class Command(BaseCommand):
         count = 0
         skipped = 0
         for row in rows:
-            l_id = self._to_int(self._get_column(row, 'id_ligne', 'id', 'ligne_id'))
+            l_id = self._to_int(self._get_column(row, 'id_ligne'))
             if l_id is None:
                 skipped += 1
                 continue
 
-            raw_r = self._get_column(row, 'id_rapport', 'rapport_id')
-            rapport_id = report_aliases.get(str(raw_r)) or report_aliases.get(
-                str(self._to_int(raw_r))
-            ) or self._to_int(raw_r)
+            raw_r = self._get_column(row, 'id_rapport')
+            rapport_id = report_aliases.get(str(raw_r))
 
-            cp_obj = self._resolve_cuve_principale(
-                self._get_column(row, 'id_cuve_principale', 'id_cuve')
-            )
-            cj_obj = self._resolve_cuve_journaliere(
-                self._get_column(row, 'id_cuve_journaliere', 'id_cj')
-            )
-            g_obj = self._resolve_groupe(
-                self._get_column(row, 'id_groupe', 'id_groupe_electrogene', 'groupe_id')
-            )
+            cp_name = self._get_column(row, 'id_cuve_principale')
+            cj_name = self._get_column(row, 'id_cuve_journaliere')
+            cp_id = cp_by_name.get(cp_name.strip()) if cp_name else None
+            cj_id = cj_by_name.get(cj_name.strip()) if cj_name else None
+            g_id = self._to_int(self._get_column(row, 'id_groupe'))
 
             defaults = {
                 'rapport_id': rapport_id,
-                'cuve_principale_id': cp_obj.pk if cp_obj else None,
-                'cuve_journaliere_id': cj_obj.pk if cj_obj else None,
-                'groupe_electrogene_id': g_obj.pk if g_obj else None,
-                # Supporte les deux graphies : avec accent et sans
+                'cuve_principale_id': cp_id,
+                'cuve_journaliere_id': cj_id,
+                'groupe_electrogene_id': g_id,
                 'quantite_gasoil_cuve_principale': self._to_float(
-                    self._get_column(
-                        row,
-                        'quantités_cuve_principale',
-                        'quantite_gasoil_cuve_principale',
-                        'quantite_cuve_principale',
-                        'qte_gasoil_cuve_principale',
-                    )
+                    self._get_column(row, 'quantités_cuve_principale', 'quantite_cuve_principale')
                 ),
                 'quantite_gasoil_cuve_journaliere': self._to_float(
-                    self._get_column(
-                        row,
-                        'quantite_gasoil_cuve_journaliere',
-                        'quantite_cuve_journaliere',
-                        'qte_gasoil_cuve_journaliere',
-                    )
+                    self._get_column(row, 'quantite_cuve_journaliere')
                 ),
-                'depotage': self._to_float(
-                    self._get_column(row, 'depotage', 'depotage_gasoil')
-                ),
-                'compteur_horaire': self._to_float(
-                    self._get_column(row, 'compteur_horaire', 'compteur_horaire_ligne')
-                ),
-                'etat_fonctionnement': self._get_column(
-                    row, 'état_fonctionnement', 'etat_fonctionnement', 'etat'
-                ) or 'F',
-                'observations': self._get_column(row, 'observations', 'observation', 'obs') or '',
+                'depotage': self._to_float(self._get_column(row, 'depotage')),
+                'compteur_horaire': self._to_float(self._get_column(row, 'compteur_horaire')),
+                'etat_fonctionnement': self._get_column(row, 'état_fonctionnement', 'etat_fonctionnement') or 'F',
+                'observations': self._get_column(row, 'observations') or '',
             }
 
             try:

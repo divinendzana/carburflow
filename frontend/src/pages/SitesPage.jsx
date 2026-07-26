@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
 import { apiFetch } from '../auth.js'
+import { formatAutonomy } from '../utils/format.js'
 
 function SitesPage({ onNavigate }) {
   const chartPalette = useMemo(() => ({ axis: '#123d6d', grid: 'rgba(11, 61, 122, 0.08)', text: '#23466d' }), [])
@@ -11,7 +12,11 @@ function SitesPage({ onNavigate }) {
   const querySiteId = useMemo(() => new URLSearchParams(window.location.search).get('siteId'), [])
   const querySiteName = useMemo(() => new URLSearchParams(window.location.search).get('siteName'), [])
   const queryMode = useMemo(() => new URLSearchParams(window.location.search).get('mode'), [])
-  const [mode, setMode] = useState(queryMode || 'details')
+  // Par défaut : vue globale (tous les sites) si on arrive sans option (pas de
+  // siteId dans l'URL). Si on arrive via un lien qui cible un site précis
+  // (querySiteId présent, ex. depuis une alerte du Dashboard), on garde le
+  // comportement existant : vue détail sur ce site.
+  const [mode, setMode] = useState(queryMode || (querySiteId ? 'details' : 'all'))
 
   const safeValue = (value) => (typeof value === 'number' ? value : 0)
 
@@ -57,7 +62,7 @@ function SitesPage({ onNavigate }) {
 
   const renderDelta = (metric, suffix = '') => {
     if (metric?.has_previous_period === false) {
-      return <small className="delta-neutral">— pas de période précédente</small>
+      return <small className="delta-neutral"></small>
     }
 
     const deltaValue = typeof metric?.variation_pct === 'number'
@@ -69,7 +74,7 @@ function SitesPage({ onNavigate }) {
 
   const renderMeanDelta = (metric, suffix = '') => {
     if (metric?.has_previous_period === false) {
-      return <small className="delta-neutral">— pas de période précédente</small>
+      return <small className="delta-neutral"></small>
     }
 
     const deltaValue = typeof metric?.mean_variation_pct === 'number'
@@ -82,29 +87,26 @@ function SitesPage({ onNavigate }) {
   useEffect(() => {
     const loadSitesData = async () => {
       try {
-        const [metric2, metric3, metric4] = await Promise.all([
-          apiFetch('/api/v1/dashboard/volume_sites'),
-          apiFetch('/api/v1/dashboard/duree_sites'),
-          apiFetch('/api/v1/dashboard/consommation_sites'),
-        ])
-
-        if (!metric2?.labels || !Array.isArray(metric2.labels)) {
+        const data = await apiFetch('/api/v1/dashboard/sites');
+        if (!data?.labels || !Array.isArray(data.labels)) {
           throw new Error('Labels non valides dans les données de l\'API site')
         }
-
+        const rawHours = data.hoursSeries || [];
+        const hoursList = Array.isArray(rawHours) ? rawHours : Object.values(rawHours);
         setsitesDashboard({
-          labels: metric2.labels,
-          volumeSeries: metric2.sites_series || [],
-          hoursSeries: Object.entries(metric3?.sites_data || {}).map(([siteKey, site]) => ({
-            id: Number(siteKey) || site.id,
+          labels: data.labels,
+          volumeSeries: data.volumeSeries || [],
+          hoursSeries: hoursList.map((site) => ({
+            id: site.id,
             nom_site: site.nom_site,
-            datasets: site.datasets || []
+            datasets: site.datasets || [],
           })),
-          consumptionSeries: metric4?.sites_series || [],
-          defaultSiteId: metric3?.default_site_id,
-        })
+          consumptionSeries: data.consumptionSeries || [],
+          autonomyBySite: data.autonomyBySite || {},
+          defaultSiteId: data.defaultSiteId,
+        });
       } catch (error) {
-        console.warn('Site backend unavailable, using demo fallback data.', error)
+        console.warn('Site backend unavailable, using demo fallback data.', error);
         setsitesDashboard({
           labels: ['01/01 au 07/01', '08/01 au 14/01', '15/01 au 21/01'],
           volumeSeries: [
@@ -120,7 +122,7 @@ function SitesPage({ onNavigate }) {
             { id: 2, nom_site: 'BUF Bonaberi', data: [190, 210, 215], color: '#3b82f6' },
           ],
           defaultSiteId: 1,
-        })
+        });
       }
     }
 
@@ -169,6 +171,24 @@ function SitesPage({ onNavigate }) {
     })
   }
 
+  const aggregateHoursSeries = (entries = []) => {
+    if (!entries.length) return []
+    let maxLength = 0
+    entries.forEach((entry) => {
+      ;(entry?.datasets || []).forEach((dataset) => {
+        if (dataset?.data?.length > maxLength) maxLength = dataset.data.length
+      })
+    })
+    return Array.from({ length: maxLength }, (_, i) => {
+      return entries.reduce((sum, entry) => {
+        const entrySum = (entry?.datasets || []).reduce((dSum, dataset) => {
+          return dSum + Number(dataset?.data?.[i] ?? 0)
+        }, 0)
+        return sum + entrySum
+      }, 0)
+    })
+  }
+
   const siteVolumeData = useMemo(() => {
     if (!sitesDashboard?.volumeSeries?.length) return []
     if (mode === 'all' || !siteId) return aggregateSeries(sitesDashboard.volumeSeries)
@@ -184,14 +204,20 @@ function SitesPage({ onNavigate }) {
   const siteHoursData = useMemo(() => {
     if (!sitesDashboard?.hoursSeries?.length) return []
     if (mode === 'all' || !siteId) {
-      return sitesDashboard.hoursSeries.flatMap((entry) => entry?.datasets?.flatMap((dataset) => dataset?.data || []) || [])
+      return aggregateHoursSeries(sitesDashboard.hoursSeries)
     }
-    return sitesDashboard.hoursSeries.find((entry) => String(entry.id) === String(selectedSite?.id))?.datasets.flatMap((dataset) => dataset.data || []) || []
+    const matchingEntry = sitesDashboard.hoursSeries.find((entry) => String(entry.id) === String(selectedSite?.id))
+    return matchingEntry ? aggregateHoursSeries([matchingEntry]) : []
   }, [selectedSite, sitesDashboard, siteId, mode])
 
   const siteVolumeStats = windowStats(siteVolumeData, startIdx, endIdx)
-  const siteConsumptionStats = windowStats(siteConsumptionData, startIdx, endIdx)
+  const siteConsumptionStats = windowStats(siteConsumptionData, startIdx, endIdx, { ignoreZeros: true })
   const siteHoursStats = windowStats(siteHoursData, startIdx, endIdx, { ignoreZeros: true })
+
+  const siteAutonomy = useMemo(() => {
+    if (!sitesDashboard?.autonomyBySite || !siteId) return null
+    return sitesDashboard.autonomyBySite[String(siteId)] || null
+  }, [sitesDashboard, siteId])
 
   const siteTableRows = useMemo(() => {
     if (!sitesDashboard?.volumeSeries?.length) return []
@@ -203,20 +229,21 @@ function SitesPage({ onNavigate }) {
     return filteredSites.map((site) => {
       const volumeSeries = site?.data || []
       const consumptionSeries = (sitesDashboard.consumptionSeries || []).find((entry) => String(entry.id) === String(site.id))?.data || []
-      const hoursSeries = (sitesDashboard.hoursSeries || []).find((entry) => String(entry.id) === String(site.id))?.datasets.flatMap((dataset) => dataset.data || []) || []
+      const matchingHours = (sitesDashboard.hoursSeries || []).find((entry) => String(entry.id) === String(site.id))
+      const hoursSeries = matchingHours ? aggregateHoursSeries([matchingHours]) : []
 
       return {
         id: site.id,
         nom_site: site.nom_site,
         volume: windowStats(volumeSeries, startIdx, endIdx),
-        consumption: windowStats(consumptionSeries, startIdx, endIdx),
+        consumption: windowStats(consumptionSeries, startIdx, endIdx, { ignoreZeros: true }),
         hours: windowStats(hoursSeries, startIdx, endIdx, { ignoreZeros: true }),
       }
     })
   }, [sitesDashboard, startIdx, endIdx, siteId])
 
   useEffect(() => {
-    if (!window.Chart || !sitesDashboard || mode === 'all' || !selectedSite) return undefined
+    if (!window.Chart || !sitesDashboard || mode === 'all') return undefined
     const charts = []
     const labels = (sitesDashboard.labels || []).slice(startIdx, endIdx + 1)
     const sliceSeries = (values = []) => values.slice(startIdx, endIdx + 1)
@@ -282,8 +309,8 @@ function SitesPage({ onNavigate }) {
               const nextMode = event.target.value
               setMode(nextMode)
             }}>
-              <option value="details">Détails</option>
               <option value="all">Global</option>
+              <option value="details">Detail</option>
             </select>
           </div>
         </div>
@@ -306,69 +333,118 @@ function SitesPage({ onNavigate }) {
                     <th>Moy. consommation (L)</th>
                     <th>Volume période (L)</th>
                     <th>Moy. volume (L)</th>
+                     <th>Autonomie</th>
                   </tr>
                 </thead>
-                <tbody>
-                  {siteTableRows.map((site) => (
-                    <tr key={site.id}>
-                      <td>{site.nom_site}</td>
-                      <td>{site.hours.total.toFixed(1)}</td>
-                      <td>{site.hours.mean.toFixed(1)}</td>
-                      <td>{site.consumption.total.toFixed(1)}</td>
-                      <td>{site.consumption.mean.toFixed(1)}</td>
-                      <td>{site.volume.total.toFixed(1)}</td>
-                      <td>{site.volume.mean.toFixed(1)}</td>
-                    </tr>
-                  ))}
+                  <tbody>
+                  {siteTableRows.map((site) => {
+                    const siteAut = sitesDashboard?.autonomyBySite?.[String(site.id)]
+                    const autDisplay = siteAut?.is_infinite_consumption ? '0h' :
+                                      siteAut?.is_infinite_autonomy ? '∞' :
+                                      siteAut?.formatted_autonomy || (siteAut?.autonomie_hours != null ? formatAutonomy(siteAut.autonomie_hours) : '—')
+                    return (
+                      <tr key={site.id}>
+                        <td>{site.nom_site}</td>
+                        <td>{site.hours.total.toFixed(1)}</td>
+                        <td>{site.hours.mean.toFixed(1)}</td>
+                        <td>{site.consumption.total.toFixed(1)}</td>
+                        <td>{site.consumption.mean.toFixed(1)}</td>
+                        <td>{site.volume.total.toFixed(1)}</td>
+                        <td>{site.volume.mean.toFixed(1)}</td>
+                        <td><strong>{autDisplay}</strong></td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
           </section>
         ) : (
-          <section className="site-overview">
-            <div className="section-title-wrap">
-              <span className="metric-label">Sites</span>
-              <h2>{selectedSite?.nom_site || 'Tous les sites'}</h2>
-            </div>
-
-            <div className="site-metric-grid">
-              <article className="metric-panel site-metric-card">
-                <span className="metric-label">Durée de fonctionnement</span>
-                <h3>{selectedSite ? 'Durée / période' : 'Cumul durée / période'}</h3>
-                <div className="site-metric-stack">
-                  <div><span>Total période</span><strong>{siteHoursStats.total.toFixed(1)} h</strong>{renderDelta(siteHoursStats)}</div>
-                  <div><span>Moyenne / semaine</span><strong>{siteHoursStats.mean.toFixed(1)} h</strong>{renderMeanDelta(siteHoursStats)}</div>
-                  <div><span>Moy. absolue</span><strong>{siteHoursStats.all_time_mean.toFixed(1)} h</strong></div>
-                  <div><span>Écart type absolu</span><strong>{siteHoursStats.all_time_stddev.toFixed(1)} h</strong></div>
+          <article 
+            key={selectedSite?.id || 'site-details'} 
+            className="group-card" 
+            style={{ 
+              position: 'relative', 
+              borderLeft: `4px solid ${selectedSite?.color || '#0b3d7a'}`,
+              padding: '1.5rem'
+            }}
+          >
+            <section className="site-overview">
+              {/* Badge d'autonomie en haut à droite comme dans GroupsPage */}
+              {selectedSite && siteAutonomy && (
+                <div style={{
+                  position: 'absolute',
+                  top: '1rem',
+                  right: '1rem',
+                  zIndex: 1,
+                }}>
+                  <div style={{
+                    backgroundColor: (() => {
+                      if (siteAutonomy.is_infinite_consumption) return '#ef4444';
+                      if (siteAutonomy.is_infinite_autonomy) return '#6b7280';
+                      const hrs = siteAutonomy.autonomie_hours ?? 0;
+                      if (hrs >= 72) return '#10b981';
+                      if (hrs >= 36) return '#fbbf24';
+                      return '#ef4444';
+                    })(),
+                    color: '#fff',
+                    padding: '0.6rem 0.9rem',
+                    borderRadius: '999px',
+                    fontWeight: 700,
+                    boxShadow: '0 12px 20px rgba(0,0,0,0.08)',
+                    display: 'inline-block',
+                  }}>
+                    {siteAutonomy.is_infinite_consumption ? '0h' : 
+                     siteAutonomy.is_infinite_autonomy ? '∞' : 
+                     siteAutonomy.formatted_autonomy || formatAutonomy(siteAutonomy.autonomie_hours)}
+                  </div>
                 </div>
-                <div className="chart-box secondary-box"><canvas id="chart-site-hours" /></div>
-              </article>
+              )}
 
-              <article className="metric-panel site-metric-card">
-                <span className="metric-label">Consommation</span>
-                <h3>{selectedSite ? 'Carburant / période' : 'Cumul consommation / période'}</h3>
-                <div className="site-metric-stack">
-                  <div><span>Total période</span><strong>{siteConsumptionStats.total.toFixed(1)} L</strong>{renderDelta(siteConsumptionStats)}</div>
-                  <div><span>Moyenne</span><strong>{siteConsumptionStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteConsumptionStats)}</div>
-                  <div><span>Moy. absolue</span><strong>{siteConsumptionStats.all_time_mean.toFixed(1)} L</strong></div>
-                  <div><span>Écart type absolu</span><strong>{siteConsumptionStats.all_time_stddev.toFixed(1)} L</strong></div>
-                </div>
-                <div className="chart-box secondary-box"><canvas id="chart-site-consumption" /></div>
-              </article>
+              <div className="section-title-wrap">
+                <span className="metric-label">Sites</span>
+                <h2>{selectedSite?.nom_site || 'Tous les sites'}</h2>
+              </div>
 
-              <article className="metric-panel site-metric-card">
-                <span className="metric-label">Volume carburant</span>
-                <h3>{selectedSite ? 'Volume total / période' : 'Cumul volume / période'}</h3>
-                <div className="site-metric-stack">
-                  <div><span>Total période</span><strong>{siteVolumeStats.total.toFixed(1)} L</strong>{renderDelta(siteVolumeStats)}</div>
-                  <div><span>Moyenne</span><strong>{siteVolumeStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteVolumeStats)}</div>
-                  <div><span>Moy. absolue</span><strong>{siteVolumeStats.all_time_mean.toFixed(1)} L</strong></div>
-                  <div><span>Écart type absolu</span><strong>{siteVolumeStats.all_time_stddev.toFixed(1)} L</strong></div>
-                </div>
-                <div className="chart-box secondary-box"><canvas id="chart-site-volume" /></div>
-              </article>
-            </div>
-          </section>
+              {/* 3 graphiques côte à côte */}
+              <div className="site-metrics-grid" style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(3, 1fr)', 
+                gap: '1.5rem',
+                marginBottom: '2rem'
+              }}>
+                <article className="metric-panel site-metric-card">
+                  <span className="metric-label">Durée de fonctionnement</span>
+                  <h3>{selectedSite ? 'Durée comptabilisée' : 'Cumul durée '}</h3>
+                  <div className="site-metric-stack">
+                    <div><span>Total période</span><strong>{siteHoursStats.total.toFixed(1)} h</strong>{renderDelta(siteHoursStats)}</div>
+                    <div><span>Moyenne</span><strong>{siteHoursStats.mean.toFixed(1)} h</strong>{renderMeanDelta(siteHoursStats)}</div>
+                  </div>
+                  <div className="chart-box secondary-box"><canvas id="chart-site-hours" /></div>
+                </article>
+
+                <article className="metric-panel site-metric-card">
+                  <span className="metric-label">Consommation</span>
+                  <h3>{selectedSite ? 'Carburant consommé' : 'Cumul consommation'}</h3>
+                  <div className="site-metric-stack">
+                    <div><span>Total période</span><strong>{siteConsumptionStats.total.toFixed(1)} L</strong>{renderDelta(siteConsumptionStats)}</div>
+                    <div><span>Moyenne</span><strong>{siteConsumptionStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteConsumptionStats)}</div>
+                  </div>
+                  <div className="chart-box secondary-box"><canvas id="chart-site-consumption" /></div>
+                </article>
+
+                <article className="metric-panel site-metric-card">
+                  <span className="metric-label">Volume carburant</span>
+                  <h3>{selectedSite ? 'Volume total' : 'Cumul volume'}</h3>
+                  <div className="site-metric-stack">
+                    <div><span>Total période</span><strong>{siteVolumeStats.total.toFixed(1)} L</strong>{renderDelta(siteVolumeStats)}</div>
+                    <div><span>Moyenne</span><strong>{siteVolumeStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteVolumeStats)}</div>
+                  </div>
+                  <div className="chart-box secondary-box"><canvas id="chart-site-volume" /></div>
+                </article>
+              </div>
+            </section>
+          </article>
         )}
       </main>
     </div>

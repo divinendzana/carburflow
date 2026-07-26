@@ -20,7 +20,6 @@ from dashboard.rapport_views import (
     NormeMetaAPIView,
     NormeXlsxAPIView,
     RapportUploadAPIView,
-    SoumissionsAPIView,
 )
 from dashboard.views import (
     CuvePrincipaleViewSet,
@@ -28,9 +27,9 @@ from dashboard.views import (
     GroupeElectrogeneViewSet,
     RapportViewSet,
     LigneRapportViewSet,
-    SitesVolumeAPIView,
-    SitesDureeAPIView,
-    SitesConsommationAPIView,
+    SitesDashboardAPIView,
+
+
     DashboardOverviewAPIView,
     GroupesAPIView,
 )
@@ -58,16 +57,13 @@ urlpatterns = [
     path('rapports/norme.xlsx', NormeXlsxAPIView.as_view(), name='api-norme-xlsx'),
     path('rapports/upload', RapportUploadAPIView.as_view(), name='api-rapport-upload'),
     path('rapports/mes', MesRapportsAPIView.as_view(), name='api-rapports-mes'),
-    path('rapports/soumissions', SoumissionsAPIView.as_view(), name='api-rapports-soumissions'),  # <-- AJOUTER CETTE LIGNE
 
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 
     path('', include(router.urls)),
-    path('dashboard/volume_sites', SitesVolumeAPIView.as_view(), name='dashboard-volume-sites'),
-    path('dashboard/duree_sites', SitesDureeAPIView.as_view(), name='dashboard-duree-sites'),
-    path('dashboard/consommation_sites', SitesConsommationAPIView.as_view(), name='dashboard-consommation-sites'),
+    path('dashboard/sites', SitesDashboardAPIView.as_view(), name='dashboard-sites'),
     path('dashboard/overview', DashboardOverviewAPIView.as_view(), name='dashboard-overview'),
     path('dashboard/groupes', GroupesAPIView.as_view(), name='dashboard-groupes'),
 ]

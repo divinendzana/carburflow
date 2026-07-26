@@ -1,17 +1,17 @@
 :root {
-  --bg: #f4f7fa;
+  --bg: #f4f8ff;
   --panel: #ffffff;
-  --panel-soft: #e4eef4;
-  --border: #d5dee7;
-  --text: #1e293b;
-  --muted: #64748b;
-  --primary: #0f4c6e;
-  --primary-2: #1a6b8a;
-  --primary-3: #e4eef4;
-  --accent-warm: #c2410c;
-  --shadow: 0 20px 60px rgba(15, 76, 110, 0.12);
-  --font-display: "Outfit", "Source Sans 3", sans-serif;
-  --font-body: "Source Sans 3", "Segoe UI", sans-serif;
+  --panel-soft: #eef5ff;
+  --border: #d8e7ff;
+  --text: #0f2747;
+  --muted: #5d728f;
+  --primary: #0b3d7a;
+  --primary-2: #1a5f9e;
+  --primary-3: #dbeafe;
+  --accent-warm: #c9842a;
+  --shadow: 0 20px 60px rgba(11, 61, 122, 0.12);
+  --font-display: "Sora", "Manrope", sans-serif;
+  --font-body: "Manrope", "Segoe UI", sans-serif;
 }
 
 * {
@@ -21,7 +21,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  background: #f4f7fa;
+  background: linear-gradient(180deg, #f8fbff 0%, #edf4ff 100%);
   color: var(--text);
   font-family: var(--font-body);
 }
@@ -613,18 +613,15 @@ button {
 
 .site-metric-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  align-items: stretch;
 }
 
 .site-metric-card {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-}
-
-.site-metric-card:first-child {
-  grid-column: 1 / -1;
+  height: 100%;
 }
 
 .site-metric-stack {
