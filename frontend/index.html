@@ -14,13 +14,29 @@
       content="Suivez les stocks, déposez les relevés Excel et pilotez chaque site sans tableurs dispersés."
     />
     <meta property="og:type" content="website" />
-    <meta name="theme-color" content="#0f4c6e" />
+    <meta name="theme-color" content="#0d4a63" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700&family=Source+Sans+3:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Source+Sans+3:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('carburflow-theme');
+          var theme = saved === 'light' || saved === 'dark'
+            ? saved
+            : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          var root = document.documentElement;
+          root.setAttribute('data-theme', theme);
+          root.classList.remove('dark', 'light', 'theme-dark', 'theme-light');
+          root.classList.add(theme);
+          root.classList.add(theme === 'dark' ? 'theme-dark' : 'theme-light');
+          root.style.colorScheme = theme;
+        } catch (e) {}
+      })();
+    </script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
   </head>
   <body>

@@ -2,10 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
 import WelcomeBanner from '../components/WelcomeBanner.jsx'
 import { apiFetch } from '../auth.js'
+import AutonomyBadge from '../components/AutonomyBadge.jsx'
+import PageLoader from '../components/PageLoader.jsx'
+import PageEnter from '../components/PageEnter.jsx'
+import { useChartPalette } from '../hooks/useChartPalette.js'
 import {
   formatAutonomyValue,
   getAutonomySeverity,
   getAutonomySeverityLabel,
+  METRIC_LABELS,
 } from '../utils/format.js'
 
 const buildDerivedMetric = (values = []) => {
@@ -40,9 +45,54 @@ const buildDerivedMetric = (values = []) => {
   }
 }
 
+const safeNum = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+
+const formatMetric = (value, digits = 1) => (
+  typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—'
+)
+
+/** Stats sur une série (semaine N / N-1 / total / moyenne). */
+const buildPeriodSeriesStats = (values = []) => {
+  const series = (values || []).map(safeNum)
+  if (!series.length) {
+    return { weekN: null, weekN1: null, total: null, mean: null }
+  }
+  const total = series.reduce((sum, value) => sum + value, 0)
+  return {
+    weekN: series[series.length - 1],
+    weekN1: series.length > 1 ? series[series.length - 2] : null,
+    total,
+    mean: total / series.length,
+  }
+}
+
+/**
+ * Consommation horaire (L/h) sur les périodes où les heures sont non nulles (> 0).
+ */
+const buildHourlyConsumptionStats = (hours = [], consumption = []) => {
+  const rates = []
+  const len = Math.max(hours.length, consumption.length)
+  for (let index = 0; index < len; index += 1) {
+    const hoursValue = safeNum(hours[index])
+    if (hoursValue <= 0) continue
+    rates.push(safeNum(consumption[index]) / hoursValue)
+  }
+  if (!rates.length) {
+    return { mean: null, max: null, min: null, stddev: null }
+  }
+  const mean = rates.reduce((sum, value) => sum + value, 0) / rates.length
+  const variance = rates.reduce((sum, value) => sum + (value - mean) ** 2, 0) / rates.length
+  return {
+    mean,
+    max: Math.max(...rates),
+    min: Math.min(...rates),
+    stddev: Math.sqrt(variance),
+  }
+}
+
 const renderDelta = (metric, suffix = '') => {
   if (metric?.has_previous_period === false) {
-    return <small className="delta-neutral">— pas de période précédente</small>
+    return <small className="delta-neutral">{METRIC_LABELS.noPreviousPeriod}</small>
   }
 
   const deltaValue = typeof metric?.variation_pct === 'number'
@@ -54,7 +104,7 @@ const renderDelta = (metric, suffix = '') => {
 
 const renderMeanDelta = (metric, suffix = '') => {
   if (metric?.has_previous_period === false) {
-    return <small className="delta-neutral">— pas de période précédente</small>
+    return <small className="delta-neutral">{METRIC_LABELS.noPreviousPeriod}</small>
   }
 
   const deltaValue = typeof metric?.mean_variation_pct === 'number'
@@ -66,11 +116,14 @@ const renderMeanDelta = (metric, suffix = '') => {
 
 
 function GroupsPage({ onNavigate }) {
-  const chartPalette = useMemo(() => ({ text: '#23466d', grid: 'rgba(11, 61, 122, 0.08)' }), [])
+  const chartPalette = useChartPalette()
   const [groupsData, setGroupsData] = useState(null)
   const [rapportDebut, setRapportDebut] = useState('')
   const [rapportFin, setRapportFin] = useState('')
+  const [draftRapportDebut, setDraftRapportDebut] = useState('')
+  const [draftRapportFin, setDraftRapportFin] = useState('')
   const [siteId, setSiteId] = useState('')
+  const [draftSiteId, setDraftSiteId] = useState('')
   const queryGroupId = useMemo(() => new URLSearchParams(window.location.search).get('groupId'), [])
   const queryGroupLabel = useMemo(() => new URLSearchParams(window.location.search).get('groupLabel'), [])
   const queryMode = useMemo(() => new URLSearchParams(window.location.search).get('mode'), [])
@@ -79,6 +132,9 @@ function GroupsPage({ onNavigate }) {
   // groupe précis (queryGroupId présent, ex. depuis une alerte du Dashboard), on
   // garde le comportement existant : vue détail sur ce groupe.
   const [mode, setMode] = useState(queryMode || (queryGroupId ? 'details' : 'all'))
+  const [draftMode, setDraftMode] = useState(queryMode || (queryGroupId ? 'details' : 'all'))
+  const [filtering, setFiltering] = useState(false)
+  const [initialLoading, setInitialLoading] = useState(true)
 
   const reportChoices = useMemo(() => (groupsData?.rapport_choices || groupsData?.report_choices || []), [groupsData])
   const rapportDebutIndex = useMemo(() => {
@@ -100,6 +156,7 @@ function GroupsPage({ onNavigate }) {
 
   const loadGroupsData = async (queryParams = '', options = {}) => {
     try {
+      if (options.isFilter) setFiltering(true)
       const data = await apiFetch(`/api/v1/dashboard/groupes${queryParams ? `?${queryParams}` : ''}`)
       const choices = data.rapport_choices || data.report_choices || []
       const normalizedBlocks = (data.group_blocks || []).map((block) => ({
@@ -114,19 +171,43 @@ function GroupsPage({ onNavigate }) {
         ...data,
         group_blocks: normalizedBlocks,
       })
-      setRapportDebut(data.selected_rapport_debut != null ? String(data.selected_rapport_debut) : String(choices[0]?.id ?? ''))
-      setRapportFin(data.selected_rapport_fin != null ? String(data.selected_rapport_fin) : String(choices[choices.length - 1]?.id ?? ''))
+      const nextDebut = data.selected_rapport_debut != null ? String(data.selected_rapport_debut) : String(choices[0]?.id ?? '')
+      const nextFin = data.selected_rapport_fin != null ? String(data.selected_rapport_fin) : String(choices[choices.length - 1]?.id ?? '')
+      setRapportDebut(nextDebut)
+      setRapportFin(nextFin)
+      setDraftRapportDebut(nextDebut)
+      setDraftRapportFin(nextFin)
       if (!options.preserveSiteSelection) {
-        setSiteId(data.selected_site_id != null ? String(data.selected_site_id) : '')
+        const nextSite = data.selected_site_id != null ? String(data.selected_site_id) : ''
+        setSiteId(nextSite)
+        setDraftSiteId(nextSite)
       }
     } catch (error) {
       console.warn('Groups backend unavailable:', error)
+    } finally {
+      setFiltering(false)
+      setInitialLoading(false)
     }
   }
 
   useEffect(() => {
+    // Premier chargement : tous les groupes / tous les sites
     loadGroupsData()
   }, [])
+
+  const applyFilters = async (event) => {
+    event.preventDefault()
+    setSiteId(draftSiteId)
+    setMode(draftMode)
+    setRapportDebut(draftRapportDebut)
+    setRapportFin(draftRapportFin)
+    const params = new URLSearchParams()
+    if (draftRapportDebut) params.set('rapport_debut', draftRapportDebut)
+    if (draftRapportFin) params.set('rapport_fin', draftRapportFin)
+    if (draftSiteId) params.set('site_id', draftSiteId)
+    if (draftMode) params.set('mode', draftMode)
+    await loadGroupsData(params.toString(), { preserveSiteSelection: true, isFilter: true })
+  }
 
   useEffect(() => {
     if (!window.Chart || !groupsData) return undefined
@@ -151,41 +232,41 @@ function GroupsPage({ onNavigate }) {
     })
 
     groupsData.group_blocks?.forEach((block) => {
-      const makeChart = (elementId, type, data, fill, label, color) => {
+      const makeChart = (elementId, data, fill, label, color, unit = 'h') => {
         const target = document.getElementById(elementId)
         if (!target) return
         const chart = new Chart(target, {
-          type,
-          data: { labels, datasets: [{ label, data: sliceSeries(data), borderColor: color, backgroundColor: `${color}20`, borderWidth: 2, tension: 0.35, fill, pointRadius: 4 }] },
-          options: baseOptions(type === 'bar' ? 'L' : 'h', type !== 'bar'),
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              label,
+              data: sliceSeries(data),
+              borderColor: color,
+              backgroundColor: `${color}20`,
+              borderWidth: 2,
+              tension: 0.35,
+              fill,
+              pointRadius: 4,
+            }],
+          },
+          options: baseOptions(unit, true),
         })
         charts.push(chart)
       }
 
-      makeChart(`chart-group-${block.id}-hours`, 'line', block.hours_run || [], true, block.label, block.color || '#0b3d7a')
-      makeChart(`chart-group-${block.id}-consumption`, 'bar', block.consumption || [], false, 'Consommation', block.color || '#0b3d7a')
+      makeChart(`chart-group-${block.id}-hours`, block.hours_run || [], true, block.label, block.color || '#0b3d7a', 'h')
+      makeChart(`chart-group-${block.id}-consumption`, block.consumption || [], true, 'Consommation', block.color || '#0b3d7a', 'L')
       const hourlyValues = (block.hours_run || []).map((hours, index) => {
         const hoursValue = safeValue(hours)
         const consumptionValue = safeValue((block.consumption || [])[index])
         return hoursValue > 0 ? Number((consumptionValue / hoursValue).toFixed(2)) : 0
       })
-      makeChart(`chart-group-${block.id}-hourly-consumption`, 'line', hourlyValues, true, 'Consommation horaire', block.color || '#0b3d7a')
+      makeChart(`chart-group-${block.id}-hourly-consumption`, hourlyValues, true, 'Consommation horaire', block.color || '#0b3d7a', 'L/h')
     })
 
     return () => charts.forEach((chart) => chart.destroy())
   }, [chartPalette, groupsData, startIndex, endIndex])
-
-  useEffect(() => {
-    if (!groupsData) return
-    const params = new URLSearchParams()
-    if (rapportDebut) params.set('rapport_debut', rapportDebut)
-    if (rapportFin) params.set('rapport_fin', rapportFin)
-    if (siteId) params.set('site_id', siteId)
-    if (mode) params.set('mode', mode)
-
-    loadGroupsData(params.toString(), { preserveSiteSelection: true })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rapportDebut, rapportFin, siteId, mode])
 
   const selectedSite = groupsData?.sites?.find((site) => String(site.id) === String(siteId)) ?? groupsData?.sites?.[0]
 
@@ -200,14 +281,11 @@ function GroupsPage({ onNavigate }) {
     return buildDerivedMetric(values)
   }, [groupsData])
 
-  if (!groupsData) {
+  if (initialLoading || !groupsData) {
     return (
       <div className="app-shell dashboard-shell">
         <Topbar activeView="groups" onNavigate={onNavigate} />
-        <main className="groups-grid">
-          <WelcomeBanner subtitle="Chargement des groupes…" />
-          <div className="loading-state">Chargement des données groupes...</div>
-        </main>
+        <PageLoader label="Analyse des groupes électrogènes…" />
       </div>
     )
   }
@@ -216,20 +294,27 @@ function GroupsPage({ onNavigate }) {
     <div className="app-shell dashboard-shell">
       <Topbar activeView="groups" onNavigate={onNavigate} />
 
-      <main className="groups-grid">
-        <WelcomeBanner subtitle="Comparez les groupes électrogènes : heures, conso et autonomies." />
-        <div className="groups-filter-bar">
+      {filtering && (
+        <div className="cf-filter-overlay" role="status" aria-live="polite">
+          <PageLoader fullscreen={false} label="Application du filtre…" />
+        </div>
+      )}
+
+      <PageEnter>
+      <main className={`groups-grid ${filtering ? 'is-filtering' : ''}`}>
+        <WelcomeBanner subtitle="Tous les groupes d’abord — affinez avec les filtres si besoin." />
+        <form className="groups-filter-bar" onSubmit={applyFilters}>
           <div className="filter-field">
-            <label htmlFor="rapport_debut">Rapport début</label>
-            <select id="rapport_debut" value={rapportDebut} onChange={(event) => setRapportDebut(event.target.value)}>
+            <label htmlFor="rapport_debut">Période — début</label>
+            <select id="rapport_debut" value={draftRapportDebut} onChange={(event) => setDraftRapportDebut(event.target.value)}>
               {(groupsData.rapport_choices || []).map((choice) => (
                 <option key={choice.id} value={String(choice.id)}>{choice.label}</option>
               ))}
             </select>
           </div>
           <div className="filter-field">
-            <label htmlFor="rapport_fin">Rapport fin</label>
-            <select id="rapport_fin" value={rapportFin} onChange={(event) => setRapportFin(event.target.value)}>
+            <label htmlFor="rapport_fin">Période — fin</label>
+            <select id="rapport_fin" value={draftRapportFin} onChange={(event) => setDraftRapportFin(event.target.value)}>
               {(groupsData.rapport_choices || []).map((choice) => (
                 <option key={choice.id} value={String(choice.id)}>{choice.label}</option>
               ))}
@@ -237,46 +322,51 @@ function GroupsPage({ onNavigate }) {
           </div>
           <div className="filter-field">
             <label htmlFor="site_id">Site</label>
-            <select id="site_id" value={siteId} onChange={(event) => setSiteId(event.target.value)}>
-              <option value="">Tous</option>
+            <select id="site_id" value={draftSiteId} onChange={(event) => setDraftSiteId(event.target.value)}>
+              <option value="">Tous les sites</option>
               {(groupsData.sites || []).map((site) => (
                 <option key={site.id} value={String(site.id)}>{site.nom_site}</option>
               ))}
             </select>
           </div>
           <div className="filter-field">
-            <label htmlFor="view_mode">Vue</label>
-            <select id="view_mode" value={mode} onChange={(event) => setMode(event.target.value)}>
-              <option value="all">Global</option>
-              <option value="details">Detail</option>
+            <label htmlFor="view_mode">Affichage</label>
+            <select id="view_mode" value={draftMode} onChange={(event) => setDraftMode(event.target.value)}>
+              <option value="all">Vue d’ensemble</option>
+              <option value="details">Détail</option>
             </select>
           </div>
-        </div>
+          <div className="filter-actions">
+            <button type="submit" className="filter-submit" disabled={filtering}>
+              {filtering ? 'Filtrage…' : 'Appliquer'}
+            </button>
+          </div>
+        </form>
 
         {(mode !== 'all' && siteId) && (
           <section className="metric-section">
             <div className="section-title-wrap">
-              <span className="metric-label">Métriques globales</span>
+              <span className="metric-label">Synthèse du site</span>
               <h2>{selectedSite?.nom_site || 'Site'}</h2>
             </div>
             <div className="summary-strip">
               <div className="summary-chip">
-                <span>Durée de fonctionnement sur la période</span>
+                <span>Heures de marche (total)</span>
                 <strong>{siteHours.total?.toFixed(1) ?? '—'} h</strong>
                 {renderDelta(siteHours)}
               </div>
               <div className="summary-chip">
-                <span>Durée de fonctionnement moyenne sur la période</span>
+                <span>Heures de marche (moyenne)</span>
                 <strong>{siteHours.mean?.toFixed(1) ?? '—'} h</strong>
                 {renderMeanDelta(siteHours)}
               </div>
               <div className="summary-chip">
-                <span>Variation consommation sur la période</span>
+                <span>Carburant consommé (total)</span>
                 <strong>{siteConsumption.total?.toFixed(1) ?? '—'} L</strong>
                 {renderDelta(siteConsumption)}
               </div>
               <div className="summary-chip">
-                <span>Variation consommation moyenne sur la période</span>
+                <span>Carburant consommé (moyenne)</span>
                 <strong>{siteConsumption.mean?.toFixed(1) ?? '—'} L</strong>
                 {renderMeanDelta(siteConsumption)}
               </div>
@@ -288,8 +378,8 @@ function GroupsPage({ onNavigate }) {
           {mode === 'all' ? (
             <section className="site-overview">
               <div className="section-title-wrap">
-                <span className="metric-label">Vue générale</span>
-                <h2>Tous les groupes</h2>
+                <span className="metric-label">Vue d’ensemble</span>
+                <h2>Tous les groupes électrogènes</h2>
               </div>
               <div className="dashboard-table-scroll">
                 <table>
@@ -297,9 +387,9 @@ function GroupsPage({ onNavigate }) {
                     <tr>
                       <th>Groupe</th>
                       <th>Site</th>
-                      <th>Heures moy.</th>
-                      <th>Conso moy. (L)</th>
-                      <th>Autonomie restante</th>
+                      <th>{METRIC_LABELS.hoursMean}</th>
+                      <th>{METRIC_LABELS.consumptionMean}</th>
+                      <th>{METRIC_LABELS.autonomyRemaining}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -310,10 +400,10 @@ function GroupsPage({ onNavigate }) {
                         <tr key={g.id} className={`autonomy-row autonomy-row--${severity}`}>
                           <td>{g.label}</td>
                           <td>{siteName}</td>
-                          <td>{g.hours?.mean?.toFixed(1) ?? '—'}</td>
-                          <td>{g.consumption_stats?.mean?.toFixed(1) ?? '—'}</td>
+                          <td>{g.hours?.mean?.toFixed(1) ?? '—'} h</td>
+                          <td>{g.consumption_stats?.mean?.toFixed(1) ?? '—'} L</td>
                           <td>
-                            <div className={`autonomy-cell autonomy-cell--${severity}`}>
+                            <div className={`autonomy-cell autonomy-cell--${severity}`} title={formatAutonomyValue(g)}>
                               <span className="autonomy-cell-value">{formatAutonomyValue(g)}</span>
                               <span className="autonomy-cell-label">{getAutonomySeverityLabel(severity)}</span>
                             </div>
@@ -337,16 +427,13 @@ function GroupsPage({ onNavigate }) {
                 return (
                   <div className={`group-autonomy-hero group-autonomy-hero--${severity}`}>
                     <div className="group-autonomy-hero-copy">
-                      <span className="group-autonomy-hero-kicker">Autonomie restante</span>
+                      <span className="group-autonomy-hero-kicker">Temps restant estimé</span>
                       <p className="group-autonomy-hero-hint">
-                        Information prioritaire : temps estimé avant rupture de stock pour ce groupe.
+                        Avant rupture de stock pour ce groupe, d’après les derniers relevés.
                       </p>
                     </div>
                     <div className="group-autonomy-hero-value-wrap">
-                      <span className="group-autonomy-hero-value">{formatAutonomyValue(group)}</span>
-                      <span className={`group-autonomy-hero-badge group-autonomy-hero-badge--${severity}`}>
-                        {getAutonomySeverityLabel(severity)}
-                      </span>
+                      <AutonomyBadge entity={group} size="lg" />
                     </div>
                   </div>
                 )
@@ -359,94 +446,91 @@ function GroupsPage({ onNavigate }) {
                 ) : null }
 
                 {group.latest_main_volume != null && (
-                  <p className="group-header-meta">Cuve principale: {group.latest_main_volume} L</p>
+                  <p className="group-header-meta">Cuve principale : {group.latest_main_volume} litres</p>
                 )}
                 {group.latest_daily_volume != null && (
-                  <p className="group-header-meta">Cuve journalière: {group.latest_daily_volume} L</p>
+                  <p className="group-header-meta">Cuve journalière : {group.latest_daily_volume} litres</p>
                 )}
               </div>
 
               <div className="group-metric-grid">
-                <div className="metric-stat-block">
-                  <span className="curve-title">Durée de fonctionnement</span>
-                  <div className="group-stats">
-                    <div>
-                      <span>Total période</span>
-                      <strong>{group.hours?.total?.toFixed(1) ?? '—'} h</strong>
-                      {renderDelta(group.hours)}
-                    </div>
-                    <div>
-                      <span>Moyenne</span>
-                      <strong>{group.hours?.mean?.toFixed(1) ?? '—'} h</strong>
-                      {renderMeanDelta(group.hours)}
-                    </div>
-                    <div>
-                      <span>Moy. absolue</span>
-                      <strong>{group.hours?.all_time_mean?.toFixed(1) ?? '—'} h</strong>
-                    </div>
-                    <div>
-                      <span>Écart type</span>
-                      <strong>{group.hours?.all_time_stddev?.toFixed(1) ?? '—'} h</strong>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="metric-stat-block">
-                  <span className="curve-title">Consommation</span>
-                  <div className="group-stats">
-                    <div>
-                      <span>Total période</span>
-                      <strong>{group.consumption_stats?.total?.toFixed(1) ?? '—'} L</strong>
-                      {renderDelta(group.consumption_stats)}
-                    </div>
-                    <div>
-                      <span>Moyenne</span>
-                      <strong>{group.consumption_stats?.mean?.toFixed(1) ?? '—'} L</strong>
-                      {renderMeanDelta(group.consumption_stats)}
-                    </div>
-                    <div>
-                      <span>Moy. absolue</span>
-                      <strong>{group.consumption_stats?.all_time_mean?.toFixed(1) ?? '—'} L</strong>
-                    </div>
-                    <div>
-                      <span>Écart type</span>
-                      <strong>{group.consumption_stats?.all_time_stddev?.toFixed(1) ?? '—'} L</strong>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="metric-stat-block">
-                  <span className="curve-title">Consommation horaire</span>
-                  {(() => {
-                    const hourlyMetric = buildDerivedMetric((group.hours_run || []).map((hours, index) => {
-                      const hoursValue = safeValue(hours)
-                      const consumptionValue = safeValue((group.consumption || [])[index])
-                      return hoursValue > 0 ? Number((consumptionValue / hoursValue).toFixed(2)) : 0
-                    }))
-                    return (
-                      <div className="group-stats">
-                        <div>
-                          <span>Total période</span>
-                          <strong>{hourlyMetric.total.toFixed(1)} L/h</strong>
-                          {renderDelta(hourlyMetric)}
-                        </div>
-                        <div>
-                          <span>Moyenne</span>
-                          <strong>{hourlyMetric.mean.toFixed(1)} L/h</strong>
-                          {renderMeanDelta(hourlyMetric)}
-                        </div>
-                        <div>
-                          <span>Moy. absolue</span>
-                          <strong>{hourlyMetric.all_time_mean.toFixed(1)} L/h</strong>
-                        </div>
-                        <div>
-                          <span>Écart type</span>
-                          <strong>{hourlyMetric.all_time_stddev.toFixed(1)} L/h</strong>
+                {(() => {
+                  const hoursWindow = (group.hours_run || []).slice(startIndex, endIndex + 1)
+                  const consumptionWindow = (group.consumption || []).slice(startIndex, endIndex + 1)
+                  const hourlyStats = buildHourlyConsumptionStats(hoursWindow, consumptionWindow)
+                  const consumptionStats = buildPeriodSeriesStats(consumptionWindow)
+                  const hoursStats = buildPeriodSeriesStats(hoursWindow)
+                  return (
+                    <>
+                      <div className="metric-stat-block">
+                        <span className="curve-title">Consommation horaire</span>
+                        <p className="group-block-note">Sur les valeurs non nulles</p>
+                        <div className="group-stats">
+                          <div>
+                            <span>Consommation horaire moyenne</span>
+                            <strong>{formatMetric(hourlyStats.mean, 2)} L/h</strong>
+                          </div>
+                          <div>
+                            <span>Consommation horaire max</span>
+                            <strong>{formatMetric(hourlyStats.max, 2)} L/h</strong>
+                          </div>
+                          <div>
+                            <span>Consommation horaire min</span>
+                            <strong>{formatMetric(hourlyStats.min, 2)} L/h</strong>
+                          </div>
+                          <div>
+                            <span>Écart-type</span>
+                            <strong>{formatMetric(hourlyStats.stddev, 2)} L/h</strong>
+                          </div>
                         </div>
                       </div>
-                    )
-                  })()}
-                </div>
+
+                      <div className="metric-stat-block">
+                        <span className="curve-title">Consommation</span>
+                        <div className="group-stats">
+                          <div>
+                            <span>Consommation dernière semaine (semaine N)</span>
+                            <strong>{formatMetric(consumptionStats.weekN)} L</strong>
+                          </div>
+                          <div>
+                            <span>Consommation avant-dernière semaine (semaine N-1)</span>
+                            <strong>{formatMetric(consumptionStats.weekN1)} L</strong>
+                          </div>
+                          <div>
+                            <span>Consommation totale sur la période de la courbe</span>
+                            <strong>{formatMetric(consumptionStats.total)} L</strong>
+                          </div>
+                          <div>
+                            <span>Consommation moyenne</span>
+                            <strong>{formatMetric(consumptionStats.mean)} L</strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="metric-stat-block">
+                        <span className="curve-title">Delta horaire</span>
+                        <div className="group-stats">
+                          <div>
+                            <span>Delta horaire dernière semaine (semaine N)</span>
+                            <strong>{formatMetric(hoursStats.weekN)} h</strong>
+                          </div>
+                          <div>
+                            <span>Delta horaire avant-dernière semaine (semaine N-1)</span>
+                            <strong>{formatMetric(hoursStats.weekN1)} h</strong>
+                          </div>
+                          <div>
+                            <span>Delta horaire total sur la période de la courbe</span>
+                            <strong>{formatMetric(hoursStats.total)} h</strong>
+                          </div>
+                          <div>
+                            <span>Delta horaire moyen</span>
+                            <strong>{formatMetric(hoursStats.mean)} h</strong>
+                          </div>
+                        </div>
+                      </div>
+                    </>
+                  )
+                })()}
               </div>
 
               <div className="group-curve-grid">
@@ -468,6 +552,7 @@ function GroupsPage({ onNavigate }) {
           }
         </section>
       </main>
+      </PageEnter>
     </div>
   )
 }

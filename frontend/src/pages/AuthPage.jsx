@@ -1,10 +1,14 @@
 import React, { useEffect, useState } from 'react'
+import { Moon, Sun } from 'lucide-react'
 import { useAuth } from '@/context/AuthContext.jsx'
+import { useTheme } from '@/context/ThemeContext.jsx'
 import { publicSitesRequest } from '@/auth.js'
 import { SignInPage } from '@/components/ui/sign-in'
 import { SignUpPage } from '@/components/ui/sign-up'
 import { Button } from '@/components/ui/button'
-import logo from '../../../logo/logo_clair_navbar.svg'
+import BrandLogo from '../components/BrandLogo.jsx'
+import PageLoader from '../components/PageLoader.jsx'
+import PageEnter from '../components/PageEnter.jsx'
 
 /* Login : contexte carburant / énergie (cuves, infrastructure) — même traitement photo que register */
 const LOGIN_HERO =
@@ -16,6 +20,7 @@ const REGISTER_HERO =
 
 function AuthPage({ onNavigate, initialMode = 'login' }) {
   const { login, register, isAuthenticated, isAdmin } = useAuth()
+  const { theme, toggleTheme } = useTheme()
   const [mode, setMode] = useState(initialMode === 'register' ? 'register' : 'login')
   const [sites, setSites] = useState([])
   const [form, setForm] = useState({
@@ -111,21 +116,40 @@ function AuthPage({ onNavigate, initialMode = 'login' }) {
   }
 
   return (
-    <div className="relative bg-background text-foreground">
-      <div className="absolute left-4 top-4 z-20 flex items-center gap-3 sm:left-6 sm:top-6">
+    <div className="relative bg-background text-foreground min-h-[100dvh]">
+      {submitting && (
+        <div className="cf-auth-loading-overlay" role="status" aria-live="polite">
+          <PageLoader
+            fullscreen={false}
+            label={mode === 'login' ? 'Connexion en cours…' : 'Création du compte…'}
+          />
+        </div>
+      )}
+
+      <div className="absolute left-4 top-4 z-20 flex flex-wrap items-center gap-2 sm:left-6 sm:top-6 sm:gap-3">
         <button
           type="button"
           onClick={() => onNavigate('home')}
           className="flex items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <img src={logo} alt="CarburFlow" className="size-9 rounded-md object-cover" />
+          <BrandLogo variant="icon" className="size-9 rounded-md object-cover" />
           <span className="font-display text-base font-semibold text-petrol">CarburFlow</span>
         </button>
         <Button variant="ghost" size="sm" onClick={() => onNavigate('home')}>
           ← Retour
         </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          onClick={(e) => { e.preventDefault(); toggleTheme() }}
+          aria-label={theme === 'dark' ? 'Passer en mode clair' : 'Passer en mode sombre'}
+        >
+          {theme === 'dark' ? <Sun className="size-4" /> : <Moon className="size-4" />}
+        </Button>
       </div>
 
+      <PageEnter delay={0.02}>
       {mode === 'login' ? (
         <SignInPage
           title={
@@ -187,6 +211,7 @@ function AuthPage({ onNavigate, initialMode = 'login' }) {
           onFieldChange={updateField}
         />
       )}
+      </PageEnter>
     </div>
   )
 }

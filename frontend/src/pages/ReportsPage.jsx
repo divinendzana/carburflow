@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
 import WelcomeBanner from '../components/WelcomeBanner.jsx'
 import RapportEditModal from '../components/RapportEditModal.jsx'
+import PageEnter from '../components/PageEnter.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import {
   deleteRapport,
@@ -301,6 +302,7 @@ function ReportsPage({ onNavigate }) {
   return (
     <div className="app-shell">
       <Topbar activeView="reports" onNavigate={onNavigate} />
+      <PageEnter>
       <main className="reports-layout reports-layout--simple">
         {(uploading || downloadingNorme || downloadingRapport) && (
           <div className="reports-toast-loading" role="status" aria-live="polite">
@@ -330,7 +332,7 @@ function ReportsPage({ onNavigate }) {
 
         <section className="reports-hero reports-hero--simple">
           <div className="reports-stub-badge">
-            {isAdmin ? 'Import des relevés' : 'Envoi des relevés'}
+            {isAdmin ? 'Relevés carburant' : 'Envoyer mon relevé'}
           </div>
           <h2>
             {isAdmin
@@ -655,6 +657,7 @@ function ReportsPage({ onNavigate }) {
           />
         )}
       </main>
+      </PageEnter>
     </div>
   )
 }

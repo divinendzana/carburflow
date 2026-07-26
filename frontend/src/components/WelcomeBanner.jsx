@@ -54,7 +54,7 @@ function WelcomeBanner({
       <div className="welcome-banner-glow" aria-hidden="true" />
       <div className="welcome-banner-body">
         <p className="welcome-banner-kicker">
-          {isAdminImport ? 'Import · Responsable' : 'CarburFlow'}
+          {isAdminImport ? 'Relevés · Responsable' : 'CarburFlow'}
         </p>
         <h1 className="welcome-banner-title">{heading}</h1>
         <p className="welcome-banner-sub">{sub}</p>

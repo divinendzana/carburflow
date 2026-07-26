@@ -2,14 +2,21 @@ import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
 import WelcomeBanner from '../components/WelcomeBanner.jsx'
 import { apiFetch } from '../auth.js'
-import { formatAutonomy } from '../utils/format.js'
+import AutonomyBadge from '../components/AutonomyBadge.jsx'
+import PageLoader from '../components/PageLoader.jsx'
+import PageEnter from '../components/PageEnter.jsx'
+import { useChartPalette } from '../hooks/useChartPalette.js'
+import { formatAutonomyValue, getAutonomySeverity } from '../utils/format.js'
 
 function SitesPage({ onNavigate }) {
-  const chartPalette = useMemo(() => ({ axis: '#123d6d', grid: 'rgba(11, 61, 122, 0.08)', text: '#23466d' }), [])
+  const chartPalette = useChartPalette()
   const [sitesDashboard, setsitesDashboard] = useState(null)
   const [startIdx, setStartIdx] = useState(0)
   const [endIdx, setEndIdx] = useState(0)
   const [siteId, setSiteId] = useState('')
+  const [draftStartIdx, setDraftStartIdx] = useState(0)
+  const [draftEndIdx, setDraftEndIdx] = useState(0)
+  const [draftSiteId, setDraftSiteId] = useState('')
   const querySiteId = useMemo(() => new URLSearchParams(window.location.search).get('siteId'), [])
   const querySiteName = useMemo(() => new URLSearchParams(window.location.search).get('siteName'), [])
   const queryMode = useMemo(() => new URLSearchParams(window.location.search).get('mode'), [])
@@ -18,6 +25,8 @@ function SitesPage({ onNavigate }) {
   // (querySiteId présent, ex. depuis une alerte du Dashboard), on garde le
   // comportement existant : vue détail sur ce site.
   const [mode, setMode] = useState(queryMode || (querySiteId ? 'details' : 'all'))
+  const [draftMode, setDraftMode] = useState(queryMode || (querySiteId ? 'details' : 'all'))
+  const [filtering, setFiltering] = useState(false)
 
   const safeValue = (value) => (typeof value === 'number' ? value : 0)
 
@@ -142,22 +151,34 @@ function SitesPage({ onNavigate }) {
   useEffect(() => {
     if (!sitesDashboard) return
 
-    if (querySiteId && querySiteName && sitesDashboard) {
+    if (querySiteId && sitesDashboard) {
       const matchingSite = siteOptions.find((site) => String(site.id) === querySiteId || site.nom_site === querySiteName)
       if (matchingSite) {
-        setSiteId(String(matchingSite.id))
+        const id = String(matchingSite.id)
+        setSiteId(id)
+        setDraftSiteId(id)
       }
     }
 
-    if (siteId === null) {
-      setSiteId('')
-    }
-
     if (sitesDashboard.labels?.length) {
+      const last = sitesDashboard.labels.length - 1
       setStartIdx(0)
-      setEndIdx(sitesDashboard.labels.length - 1)
+      setEndIdx(last)
+      setDraftStartIdx(0)
+      setDraftEndIdx(last)
     }
-  }, [sitesDashboard, siteId, querySiteId, querySiteName, siteOptions])
+  }, [sitesDashboard, querySiteId, querySiteName, siteOptions])
+
+  const applyFilters = async (event) => {
+    event.preventDefault()
+    setFiltering(true)
+    await new Promise((resolve) => setTimeout(resolve, 320))
+    setStartIdx(draftStartIdx)
+    setEndIdx(draftEndIdx)
+    setSiteId(draftSiteId)
+    setMode(draftMode)
+    setFiltering(false)
+  }
 
   const selectedSite = useMemo(() => {
     if (!sitesDashboard || mode === 'all' || !siteId) return null
@@ -274,10 +295,7 @@ function SitesPage({ onNavigate }) {
     return (
       <div className="app-shell dashboard-shell">
         <Topbar activeView="sites" onNavigate={onNavigate} />
-        <main className="groups-grid">
-          <WelcomeBanner subtitle="Chargement des sites…" />
-          <div className="loading-state">Chargement des données du site...</div>
-        </main>
+        <PageLoader label="Chargement des sites…" />
       </div>
     )
   }
@@ -286,39 +304,48 @@ function SitesPage({ onNavigate }) {
     <div className="app-shell dashboard-shell">
       <Topbar activeView="sites" onNavigate={onNavigate} />
 
-      <main className="groups-grid">
-        <WelcomeBanner subtitle="Suivez les volumes, consommations et autonomies de chaque site." />
-        <div className="groups-filter-bar">
+      {filtering && (
+        <div className="cf-filter-overlay" role="status" aria-live="polite">
+          <PageLoader fullscreen={false} label="Application du filtre…" />
+        </div>
+      )}
+
+      <PageEnter>
+      <main className={`groups-grid ${filtering ? 'is-filtering' : ''}`}>
+        <WelcomeBanner subtitle="Tous les sites d’abord — affinez avec les filtres si besoin." />
+        <form className="groups-filter-bar" onSubmit={applyFilters}>
           <div className="filter-field">
-            <label htmlFor="site-start">Rapport début</label>
-            <select id="site-start" value={String(startIdx)} onChange={(event) => setStartIdx(Number(event.target.value))}>
+            <label htmlFor="site-start">Période — début</label>
+            <select id="site-start" value={String(draftStartIdx)} onChange={(event) => setDraftStartIdx(Number(event.target.value))}>
               {(sitesDashboard?.labels || []).map((label, index) => (<option key={`${label}-${index}`} value={String(index)}>{label}</option>))}
             </select>
           </div>
           <div className="filter-field">
-            <label htmlFor="site-end">Rapport fin</label>
-            <select id="site-end" value={String(endIdx)} onChange={(event) => setEndIdx(Number(event.target.value))}>
+            <label htmlFor="site-end">Période — fin</label>
+            <select id="site-end" value={String(draftEndIdx)} onChange={(event) => setDraftEndIdx(Number(event.target.value))}>
               {(sitesDashboard?.labels || []).map((label, index) => (<option key={`${label}-${index}`} value={String(index)}>{label}</option>))}
             </select>
           </div>
           <div className="filter-field">
             <label htmlFor="site-select">Site</label>
-            <select id="site-select" value={siteId ?? ''} onChange={(event) => setSiteId(event.target.value)}>
-              <option value="">Tous</option>
+            <select id="site-select" value={draftSiteId ?? ''} onChange={(event) => setDraftSiteId(event.target.value)}>
+              <option value="">Tous les sites</option>
               {siteOptions.map((site) => (<option key={site.id} value={site.id}>{site.nom_site}</option>))}
             </select>
           </div>
           <div className="filter-field">
-            <label htmlFor="view_mode">Vue</label>
-            <select id="view_mode" value={mode} onChange={(event) => {
-              const nextMode = event.target.value
-              setMode(nextMode)
-            }}>
-              <option value="all">Global</option>
-              <option value="details">Detail</option>
+            <label htmlFor="view_mode">Affichage</label>
+            <select id="view_mode" value={draftMode} onChange={(event) => setDraftMode(event.target.value)}>
+              <option value="all">Vue d’ensemble</option>
+              <option value="details">Détail</option>
             </select>
           </div>
-        </div>
+          <div className="filter-actions">
+            <button type="submit" className="filter-submit" disabled={filtering}>
+              {filtering ? 'Filtrage…' : 'Appliquer'}
+            </button>
+          </div>
+        </form>
 
         {mode === 'all' ? (
           <section className="site-overview">
@@ -332,23 +359,21 @@ function SitesPage({ onNavigate }) {
                 <thead>
                   <tr>
                     <th>Site</th>
-                    <th>Durée période (h)</th>
-                    <th>Moy. durée (h)</th>
-                    <th>Consommation période (L)</th>
-                    <th>Moy. consommation (L)</th>
-                    <th>Volume période (L)</th>
-                    <th>Moy. volume (L)</th>
-                     <th>Autonomie</th>
+                    <th>Heures (période)</th>
+                    <th>Heures (moyenne)</th>
+                    <th>Conso. (période, L)</th>
+                    <th>Conso. (moyenne, L)</th>
+                    <th>Stock (période, L)</th>
+                    <th>Stock (moyenne, L)</th>
+                    <th>Temps restant estimé</th>
                   </tr>
                 </thead>
                   <tbody>
                   {siteTableRows.map((site) => {
-                    const siteAut = sitesDashboard?.autonomyBySite?.[String(site.id)]
-                    const autDisplay = siteAut?.is_infinite_consumption ? '0h' :
-                                      siteAut?.is_infinite_autonomy ? '∞' :
-                                      siteAut?.formatted_autonomy || (siteAut?.autonomie_hours != null ? formatAutonomy(siteAut.autonomie_hours) : '—')
+                    const siteAut = sitesDashboard?.autonomyBySite?.[String(site.id)] || {}
+                    const severity = getAutonomySeverity(siteAut)
                     return (
-                      <tr key={site.id}>
+                      <tr key={site.id} className={`autonomy-row autonomy-row--${severity}`}>
                         <td>{site.nom_site}</td>
                         <td>{site.hours.total.toFixed(1)}</td>
                         <td>{site.hours.mean.toFixed(1)}</td>
@@ -356,7 +381,9 @@ function SitesPage({ onNavigate }) {
                         <td>{site.consumption.mean.toFixed(1)}</td>
                         <td>{site.volume.total.toFixed(1)}</td>
                         <td>{site.volume.mean.toFixed(1)}</td>
-                        <td><strong>{autDisplay}</strong></td>
+                        <td>
+                          <AutonomyBadge entity={siteAut} size="sm" />
+                        </td>
                       </tr>
                     )
                   })}
@@ -377,32 +404,8 @@ function SitesPage({ onNavigate }) {
             <section className="site-overview">
               {/* Badge d'autonomie en haut à droite comme dans GroupsPage */}
               {selectedSite && siteAutonomy && (
-                <div style={{
-                  position: 'absolute',
-                  top: '1rem',
-                  right: '1rem',
-                  zIndex: 1,
-                }}>
-                  <div style={{
-                    backgroundColor: (() => {
-                      if (siteAutonomy.is_infinite_consumption) return '#ef4444';
-                      if (siteAutonomy.is_infinite_autonomy) return '#6b7280';
-                      const hrs = siteAutonomy.autonomie_hours ?? 0;
-                      if (hrs >= 72) return '#10b981';
-                      if (hrs >= 36) return '#fbbf24';
-                      return '#ef4444';
-                    })(),
-                    color: '#fff',
-                    padding: '0.6rem 0.9rem',
-                    borderRadius: '999px',
-                    fontWeight: 700,
-                    boxShadow: '0 12px 20px rgba(0,0,0,0.08)',
-                    display: 'inline-block',
-                  }}>
-                    {siteAutonomy.is_infinite_consumption ? '0h' : 
-                     siteAutonomy.is_infinite_autonomy ? '∞' : 
-                     siteAutonomy.formatted_autonomy || formatAutonomy(siteAutonomy.autonomie_hours)}
-                  </div>
+                <div className="site-autonomy-float" aria-label={`Temps restant : ${formatAutonomyValue(siteAutonomy)}`}>
+                  <AutonomyBadge entity={siteAutonomy} size="lg" />
                 </div>
               )}
 
@@ -452,6 +455,7 @@ function SitesPage({ onNavigate }) {
           </article>
         )}
       </main>
+      </PageEnter>
     </div>
   )
 }

@@ -7,6 +7,9 @@ import GroupsPage from './pages/GroupsPage.jsx'
 import AuthPage from './pages/AuthPage.jsx'
 import ReportsPage from './pages/ReportsPage.jsx'
 import { AuthProvider, useAuth } from './context/AuthContext.jsx'
+import { ThemeProvider } from './context/ThemeContext.jsx'
+import InteractionShell from './components/InteractionShell.jsx'
+import PageLoader from './components/PageLoader.jsx'
 
 const USER_VIEWS = new Set(['reports'])
 const PUBLIC_VIEWS = new Set(['home', 'login', 'register'])
@@ -93,7 +96,7 @@ function AppRoutes() {
   }, [loading, view, isAuthenticated, isAdmin])
 
   if (loading) {
-    return <div className="auth-loading"><div className="auth-loading-card">Chargement de votre session…</div></div>
+    return <PageLoader label="Ouverture de votre session…" />
   }
 
   if (view === 'login' || view === 'register') {
@@ -125,9 +128,13 @@ function AppRoutes() {
 
 function App() {
   return (
-    <AuthProvider>
-      <AppRoutes />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <InteractionShell>
+          <AppRoutes />
+        </InteractionShell>
+      </AuthProvider>
+    </ThemeProvider>
   )
 }
 

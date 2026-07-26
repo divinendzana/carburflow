@@ -746,10 +746,13 @@ class CuvesDashboardAPIView(APIView):
             selected_site_id = int(selected_site_id) if selected_site_id not in (None, '') else None
         except (TypeError, ValueError):
             selected_site_id = None
-        if selected_site_id is None and sites:
-            selected_site_id = sites[0].id
 
-        selected_site = next((site for site in sites if site.id == selected_site_id), None)
+        # Aucun site → toutes les cuves ; sinon filtre site.
+        selected_sites = (
+            [site for site in sites if site.id == selected_site_id]
+            if selected_site_id is not None
+            else list(sites)
+        )
 
         debut_raw = request.query_params.get('rapport_debut')
         fin_raw = request.query_params.get('rapport_fin')
@@ -801,42 +804,54 @@ class CuvesDashboardAPIView(APIView):
         site_principal_values = []
         site_journalier_values = []
 
-        if selected_site:
-            principal_tanks = [selected_site] if (selected_site.capacite or 0) > 0 else []
-            journalier_tanks = [
-                cj for cj in selected_site.cuves_journaliere.all()
-                if (cj.capacite or 0) > 0
-            ]
+        principal_tanks = [
+            site for site in selected_sites if (site.capacite or 0) > 0
+        ]
+        for index, cp in enumerate(principal_tanks):
+            values = [series[0].get(cp.id, 0.0) for series in report_series]
+            principal_blocks.append({
+                'id': cp.id,
+                'label': f"CP #{cp.id} ({cp.identifiant})",
+                'site_id': cp.id,
+                'site_label': cp.identifiant,
+                'capacity': cp.capacite,
+                'color': GROUPE_COLORS[index % len(GROUPE_COLORS)],
+                'stats': _period_stats(values, start_idx, end_idx),
+                'values': [round(v, 1) for v in values],
+            })
 
-            for index, cp in enumerate(principal_tanks):
-                values = [series[0].get(cp.id, 0.0) for series in report_series]
-                principal_blocks.append({
-                    'id': cp.id,
-                    'label': f"CP #{cp.id} ({selected_site.identifiant})",
-                    'capacity': cp.capacite,
-                    'color': GROUPE_COLORS[index % len(GROUPE_COLORS)],
-                    'stats': _period_stats(values, start_idx, end_idx),
-                    'values': [round(v, 1) for v in values],
-                })
-
-            for index, cj in enumerate(journalier_tanks):
+        journalier_index = 0
+        for site in selected_sites:
+            for cj in site.cuves_journaliere.all():
+                if (cj.capacite or 0) <= 0:
+                    continue
                 values = [series[1].get(cj.id, 0.0) for series in report_series]
                 journalier_blocks.append({
                     'id': cj.id,
-                    'label': f"CJ #{cj.id} ({selected_site.identifiant})",
+                    'label': f"CJ #{cj.id} ({site.identifiant})",
+                    'site_id': site.id,
+                    'site_label': site.identifiant,
                     'capacity': cj.capacite,
-                    'color': GROUPE_COLORS[index % len(GROUPE_COLORS)],
+                    'color': GROUPE_COLORS[journalier_index % len(GROUPE_COLORS)],
                     'stats': _period_stats(values, start_idx, end_idx),
                     'values': [round(v, 1) for v in values],
                 })
+                journalier_index += 1
 
-            for principal_map, journaliere_map in report_series:
-                site_principal_values.append(
-                    sum(principal_map.get(cp.id, 0.0) for cp in principal_tanks)
-                )
-                site_journalier_values.append(
-                    sum(journaliere_map.get(cj.id, 0.0) for cj in journalier_tanks)
-                )
+        journalier_tanks = [
+            cj
+            for site in selected_sites
+            for cj in site.cuves_journaliere.all()
+            if (cj.capacite or 0) > 0
+        ]
+
+        for principal_map, journaliere_map in report_series:
+            site_principal_values.append(
+                sum(principal_map.get(cp.id, 0.0) for cp in principal_tanks)
+            )
+            site_journalier_values.append(
+                sum(journaliere_map.get(cj.id, 0.0) for cj in journalier_tanks)
+            )
 
         return Response({
             'labels': labels,

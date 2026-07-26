@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
 import WelcomeBanner from '../components/WelcomeBanner.jsx'
 import { apiFetch } from '../auth.js'
+import AutonomyBadge from '../components/AutonomyBadge.jsx'
+import PageLoader from '../components/PageLoader.jsx'
+import PageEnter from '../components/PageEnter.jsx'
 import { formatAutonomy, getAutonomySeverity } from '../utils/format.js'
 
 const SEVERITY_META = {
-  critical: { label: 'Critique', level: 'critical', rank: 3 },
-  medium: { label: 'Moyen', level: 'medium', rank: 2 },
-  low: { label: 'Faible', level: 'low', rank: 1 },
+  critical: { label: 'Urgent', level: 'critical', rank: 3 },
+  medium: { label: 'À surveiller', level: 'medium', rank: 2 },
+  low: { label: 'Attention', level: 'low', rank: 1 },
 }
 
 function normalizeAlertSeverity(alert) {
@@ -216,19 +219,19 @@ function DashboardPage({ onNavigate }) {
 
     return [
       {
-        label: 'Autonomie critique',
+        label: 'Sites urgents',
         title: `${criticalAutonomySites}`,
-        detail: 'Sites avec autonomie < 24h',
+        detail: 'Moins de 24 h de stock estimé',
       },
       {
-        label: 'Groupes anormaux',
+        label: 'Anomalies groupes',
         title: `${abnormalGroups}`,
-        detail: 'Groupes avec consommation anormale',
+        detail: 'Consommation inhabituelle détectée',
       },
       {
-        label: 'Consommation totale',
+        label: 'Carburant consommé',
         title: formatValue(totalConsumption, ' L'),
-        detail: 'Dernière période analysée',
+        detail: 'Sur la dernière période analysée',
         deviation: {
           value: consumptionDeviation,
           isNegative: consumptionDeviation !== null && consumptionDeviation < 0,
@@ -236,9 +239,9 @@ function DashboardPage({ onNavigate }) {
         },
       },
       {
-        label: 'Durée de fonctionnement',
+        label: 'Heures de marche',
         title: formatValue(totalRuntime, ' h'),
-        detail: 'Somme des heures de fonctionnement',
+        detail: 'Total des heures enregistrées',
         deviation: {
           value: runtimeDeviation,
           isNegative: runtimeDeviation !== null && runtimeDeviation < 0,
@@ -433,12 +436,7 @@ function DashboardPage({ onNavigate }) {
     return (
       <div className="app-shell dashboard-shell">
         <Topbar activeView="dashboard" onNavigate={onNavigate} />
-        <main className="dashboard-grid">
-          <WelcomeBanner
-            subtitle="Chargement de votre tableau de bord…"
-          />
-          <div className="loading-state">Chargement du tableau de bord...</div>
-        </main>
+        <PageLoader label="Préparation du tableau de bord…" />
       </div>
     )
   }
@@ -447,9 +445,10 @@ function DashboardPage({ onNavigate }) {
     <div className="app-shell dashboard-shell">
       <Topbar activeView="dashboard" onNavigate={onNavigate} />
 
+      <PageEnter>
       <main className="dashboard-grid dashboard-grid-4col">
         <WelcomeBanner
-          subtitle="Voici l’essentiel de vos stocks, alertes et consommations — en un coup d’œil."
+          subtitle="Stocks, alertes et consommations — l’essentiel pour décider vite."
         />
         <div className="dashboard-summary-grid">
           {summaryCards.map((card) => (
@@ -473,8 +472,8 @@ function DashboardPage({ onNavigate }) {
         <section className="dashboard-table metric-panel">
           <div className="metric-title-row">
             <div>
-              <span className="metric-label">Alertes Autonomie</span>
-              <h3>Sites à faible autonomie</h3>
+              <span className="metric-label">Priorité stock</span>
+              <h3>Sites bientôt à sec</h3>
             </div>
           </div>
           <div className="dashboard-table-scroll">
@@ -482,8 +481,8 @@ function DashboardPage({ onNavigate }) {
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left' }}>Site</th>
-                  <th style={{ textAlign: 'right' }}>Dernier volume</th>
-                  <th style={{ textAlign: 'center' }}>Autonomie</th>
+                  <th style={{ textAlign: 'right' }}>Dernier stock</th>
+                  <th style={{ textAlign: 'center' }}>Temps restant estimé</th>
                 </tr>
               </thead>
               <tbody>
@@ -495,17 +494,15 @@ function DashboardPage({ onNavigate }) {
                       <td style={{ textAlign: 'left' }}>{row.site_name || row.label}</td>
                       <td style={{ textAlign: 'right' }}>{formatValue(row.latest_volume, ' L')}</td>
                       <td style={{ textAlign: 'center' }}>
-                        <span className={`autonomy-pill autonomy-pill--${level}`}>
-                          {row.formatted_autonomy || (row.autonomie_hours != null ? formatAutonomy(row.autonomie_hours) : '—')}
-                        </span>
+                        <AutonomyBadge entity={row} size="sm" showLabel={false} />
                       </td>
                     </tr>
                   )
                 })}
                 {lowAutonomySiteRows.length === 0 && (
                   <tr>
-                    <td colSpan="3" style={{ textAlign: 'center', color: '#6b7280', padding: '1rem' }}>
-                      Aucun site avec autonomie faible
+                    <td colSpan="3" className="empty-state-cell">
+                      Aucun site en tension pour le moment
                     </td>
                   </tr>
                 )}
@@ -518,8 +515,8 @@ function DashboardPage({ onNavigate }) {
         <section className="dashboard-table metric-panel">
           <div className="metric-title-row">
             <div>
-              <span className="metric-label">Alertes Anomalies</span>
-              <h3>Groupes à consommation anormale</h3>
+              <span className="metric-label">Anomalies</span>
+              <h3>Consommation inhabituelle</h3>
             </div>
           </div>
           <div className="dashboard-table-scroll">
@@ -528,8 +525,8 @@ function DashboardPage({ onNavigate }) {
                 <tr>
                   <th style={{ textAlign: 'left' }}>Groupe</th>
                   <th style={{ textAlign: 'left' }}>Site</th>
-                  <th style={{ textAlign: 'right' }}>Conso horaire (déduite)</th>
-                  <th style={{ textAlign: 'right' }}>Conso horaire (réelle)</th>
+                  <th style={{ textAlign: 'right' }}>Conso. estimée (L/h)</th>
+                  <th style={{ textAlign: 'right' }}>Conso. mesurée (L/h)</th>
                   <th style={{ textAlign: 'center' }}>Écart</th>
                 </tr>
               </thead>
@@ -539,13 +536,13 @@ function DashboardPage({ onNavigate }) {
                     <td style={{ textAlign: 'left' }}>{row.label}</td>
                     <td style={{ textAlign: 'left' }}>{row.site_name || '—'}</td>
                     <td style={{ textAlign: 'right' }}>
-                      <strong style={{ color: '#dc2626' }}>
+                      <strong className="text-danger">
                         {formatValue(row.mean_hourly_consumption_deduite, ' L/h')}
                       </strong>
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {row.latest_hourly_consumption == null
-                        ? <span title="Consommation avérée sans heures de fonctionnement enregistrées">—</span>
+                        ? <span title="Consommation sans heures de marche enregistrées">Non dispo.</span>
                         : formatValue(row.mean_hourly_consumption, ' L/h')}
                     </td>
                     <td style={{ textAlign: 'center' }}>
@@ -555,8 +552,8 @@ function DashboardPage({ onNavigate }) {
                 ))}
                 {abnormalGroupRows.length === 0 && (
                   <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', color: '#6b7280', padding: '1rem' }}>
-                      Aucun groupe avec consommation anormale
+                    <td colSpan="5" className="empty-state-cell">
+                      Aucune anomalie détectée
                     </td>
                   </tr>
                 )}
@@ -569,7 +566,7 @@ function DashboardPage({ onNavigate }) {
         <section className="dashboard-table metric-panel">
           <div className="metric-title-row">
             <div>
-              <span className="metric-label">Consommation Groupes</span>
+              <span className="metric-label">Consommation</span>
               <h3>Groupes les plus gourmands</h3>
             </div>
           </div>
@@ -579,8 +576,8 @@ function DashboardPage({ onNavigate }) {
                 <tr>
                   <th style={{ textAlign: 'left' }}>Groupe</th>
                   <th style={{ textAlign: 'left' }}>Site</th>
-                  <th style={{ textAlign: 'right' }}>Moy. conso</th>
-                  <th style={{ textAlign: 'right' }}>Dernière conso</th>
+                  <th style={{ textAlign: 'right' }}>Conso. moyenne</th>
+                  <th style={{ textAlign: 'right' }}>Dernière conso.</th>
                   <th style={{ textAlign: 'center' }}>Écart</th>
                 </tr>
               </thead>
@@ -596,7 +593,7 @@ function DashboardPage({ onNavigate }) {
                 ))}
                 {topConsumerGroupRows.length === 0 && (
                   <tr>
-                    <td colSpan="5" style={{ textAlign: 'center', color: '#6b7280', padding: '1rem' }}>
+                    <td colSpan="5" className="empty-state-cell">
                       Aucun groupe disponible
                     </td>
                   </tr>
@@ -610,7 +607,7 @@ function DashboardPage({ onNavigate }) {
         <section className="dashboard-table metric-panel">
           <div className="metric-title-row">
             <div>
-              <span className="metric-label">Consommation Sites</span>
+              <span className="metric-label">Consommation</span>
               <h3>Sites les plus gourmands</h3>
             </div>
           </div>
@@ -619,8 +616,8 @@ function DashboardPage({ onNavigate }) {
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left' }}>Site</th>
-                  <th style={{ textAlign: 'right' }}>Moy. conso</th>
-                  <th style={{ textAlign: 'right' }}>Dernière conso</th>
+                  <th style={{ textAlign: 'right' }}>Conso. moyenne</th>
+                  <th style={{ textAlign: 'right' }}>Dernière conso.</th>
                   <th style={{ textAlign: 'center' }}>Écart</th>
                 </tr>
               </thead>
@@ -635,7 +632,7 @@ function DashboardPage({ onNavigate }) {
                 ))}
                 {topConsumerSiteRows.length === 0 && (
                   <tr>
-                    <td colSpan="4" style={{ textAlign: 'center', color: '#6b7280', padding: '1rem' }}>
+                    <td colSpan="4" className="empty-state-cell">
                       Aucun site disponible
                     </td>
                   </tr>
@@ -649,23 +646,23 @@ function DashboardPage({ onNavigate }) {
         <section className="dashboard-alerts metric-panel" style={{ gridColumn: '1 / -1' }}>
           <div className="metric-title-row alert-section-head">
             <div>
-              <span className="metric-label">Notifications d'alertes</span>
+              <span className="metric-label">À traiter</span>
               <h3>
                 {alerts.length
-                  ? (alertCounts.critical > 0 ? 'Attention : alertes en cours' : 'Alertes à surveiller')
-                  : 'Situation normale'}
+                  ? (alertCounts.critical > 0 ? 'Des actions sont nécessaires' : 'Points à surveiller')
+                  : 'Tout est sous contrôle'}
               </h3>
             </div>
             {alerts.length > 0 && (
               <div className="alert-legend" aria-label="Niveaux d’alerte">
                 <span className="alert-legend-item alert-legend--critical">
-                  Critique <strong>{alertCounts.critical}</strong>
+                  Urgent <strong>{alertCounts.critical}</strong>
                 </span>
                 <span className="alert-legend-item alert-legend--medium">
-                  Moyen <strong>{alertCounts.medium}</strong>
+                  À surveiller <strong>{alertCounts.medium}</strong>
                 </span>
                 <span className="alert-legend-item alert-legend--low">
-                  Faible <strong>{alertCounts.low}</strong>
+                  Attention <strong>{alertCounts.low}</strong>
                 </span>
               </div>
             )}
@@ -717,6 +714,7 @@ function DashboardPage({ onNavigate }) {
           </div>
         </section>
       </main>
+      </PageEnter>
     </div>
   )
 }

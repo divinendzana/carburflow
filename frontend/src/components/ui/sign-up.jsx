@@ -205,9 +205,18 @@ export function SignUpPage({
               <button
                 type="submit"
                 disabled={submitting}
-                className="animate-element animate-delay-700 w-full rounded-2xl bg-primary py-4 font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-60"
+                className="animate-element animate-delay-700 cf-interactive-btn w-full rounded-2xl bg-primary py-4 font-medium text-primary-foreground transition-all hover:bg-primary/90 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-60"
               >
-                {submitting ? 'Patientez…' : 'Créer mon compte'}
+                {submitting ? (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <span className="reports-spinner" style={{ width: 18, height: 18 }} aria-hidden="true">
+                      <span className="reports-spinner-ring" />
+                    </span>
+                    Création…
+                  </span>
+                ) : (
+                  'Créer mon compte'
+                )}
               </button>
             </form>
 

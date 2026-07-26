@@ -222,7 +222,7 @@ function HomePage({ onNavigate }) {
             Ouvrir le dashboard
           </Button>
           <Button size="lg" variant="outline" className="hero-cta" onClick={() => onNavigate('reports')}>
-            Voir les rapports
+            Voir les relevés
           </Button>
         </>
       )
@@ -230,7 +230,7 @@ function HomePage({ onNavigate }) {
     if (isAuthenticated) {
       return (
         <Button size="lg" className="hero-cta" onClick={() => onNavigate('reports')}>
-          Aller aux rapports
+          Aller aux relevés
           <ArrowRight data-icon="inline-end" />
         </Button>
       )
@@ -365,7 +365,7 @@ function HomePage({ onNavigate }) {
           </ol>
         </section>
 
-        <section className="reveal-section border-y border-border/70 bg-[linear-gradient(180deg,#ffffff_0%,#f4f7fa_100%)] py-16 lg:py-20">
+        <section className="reveal-section cf-landing-band border-y border-border/70 py-16 lg:py-20">
           <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
             <div className="max-w-2xl">
               <h2 className="reveal-head font-display text-3xl font-semibold tracking-tight text-foreground">
@@ -445,7 +445,7 @@ function HomePage({ onNavigate }) {
               <div className="flex flex-wrap gap-3">
                 <Button
                   size="lg"
-                  className="bg-white text-petrol hover:bg-white/90"
+                  className="cf-cta-light bg-white text-petrol hover:bg-white/90"
                   onClick={() => onNavigate('login')}
                 >
                   Accéder à CarburFlow

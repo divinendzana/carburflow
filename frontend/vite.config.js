@@ -23,6 +23,9 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: 5174,
       strictPort: true,
+      fs: {
+        allow: [path.resolve(__dirname, '..')],
+      },
       // Sans ça, Vite renvoie une page « host not allowed » (pas du JS)
       // → le navigateur bloque @vite/client (MIME interdit / vide)
       allowedHosts: [
