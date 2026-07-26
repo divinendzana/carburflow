@@ -295,14 +295,14 @@ function DashboardPage({ onNavigate }) {
   }, [siteRows])
 
   const alertItems = useMemo(() => {
-    // --- CAS 1 : Sites à autonomie critique ---
-    // Sites avec autonomie finie < 24h (critique), 24-36h (à surveiller)
-    // et sites avec consommation mais 0h de delta (is_infinite_consumption)
+    // --- CAS 1 : Sites à autonomie critique ou sous surveillance ---
+    // - Autonomie < 48 h -> Urgent (Critique)
+    // - Autonomie < 120 h -> À surveiller
+    // - 0 h (consommation sans delta horaire) -> Urgent (Critique)
     const autonomyAlerts = siteRows
       .flatMap((site) => {
         if (site.is_infinite_autonomy) return []
 
-        // Cas 0h : consommation sans delta horaire = critique immédiat
         if (site.is_infinite_consumption) {
           return [{
             id: `site-critique-0h-${site.id}`,
@@ -321,7 +321,7 @@ function DashboardPage({ onNavigate }) {
 
         if (site.autonomie_hours == null) return []
 
-        if (site.autonomie_hours < 24) {
+        if (site.autonomie_hours < 48) {
           return [{
             id: `site-critique-${site.id}`,
             type: 'critique',
@@ -332,12 +332,12 @@ function DashboardPage({ onNavigate }) {
             site_id: site.id,
             site_name: site.site_name,
             title: `Site ${site.site_name} — autonomie critique : ${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)}`,
-            subtitle: `Moins de 24 h de carburant restant. Stock actuel : ${site.latest_volume.toFixed(0)} L — consommation moyenne : ${site.avg_consumption.toFixed(1)} L/semaine. Réapprovisionner de toute urgence.`,
+            subtitle: `Autonomie sous le seuil critique (${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)}). Stock actuel : ${site.latest_volume.toFixed(0)} L — consommation moyenne : ${site.avg_consumption.toFixed(1)} L/période. Réapprovisionner de toute urgence.`,
             is_infinite_consumption: false,
           }]
         }
 
-        if (site.autonomie_hours < 36) {
+        if (site.autonomie_hours < 120) {
           return [{
             id: `site-faible-${site.id}`,
             type: 'alerte',
@@ -347,8 +347,8 @@ function DashboardPage({ onNavigate }) {
             severity: 'medium',
             site_id: site.id,
             site_name: site.site_name,
-            title: `Site ${site.site_name} — autonomie faible : ${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)}`,
-            subtitle: `Entre 24 h et 36 h de carburant restant. Stock actuel : ${site.latest_volume.toFixed(0)} L — consommation moyenne : ${site.avg_consumption.toFixed(1)} L/semaine. Planifier un réapprovisionnement.`,
+            title: `Site ${site.site_name} — autonomie sous surveillance : ${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)}`,
+            subtitle: `Autonomie sous 5 jours (${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)}). Stock actuel : ${site.latest_volume.toFixed(0)} L — consommation moyenne : ${site.avg_consumption.toFixed(1)} L/période. Planifier un réapprovisionnement.`,
             is_infinite_consumption: false,
           }]
         }
@@ -356,10 +356,9 @@ function DashboardPage({ onNavigate }) {
         return []
       })
 
-    // --- CAS 2 : Groupes avec delta horaire mais sans consommation horaire calculable ---
-    // Le groupe a tourné (avg_hours > 0) mais pas de consommation associée
+    // --- CAS 2 : Groupes qui ont tourné (delta horaire > 0) mais n'ont PAS de consommation horaire calculable ---
     const groupWithHoursNoConsumption = groupRows
-      .filter((g) => !g.is_infinite_autonomy && !g.is_infinite_consumption && g.avg_hours > 0 && g.mean_hourly_consumption === 0)
+      .filter((g) => (g.avg_hours > 0 || g.latest_hours > 0) && (g.mean_hourly_consumption === 0 || g.mean_hourly_consumption_deduite === 0 || g.avg_consumption === 0) && !g.is_infinite_consumption)
       .map((g) => ({
         id: `group-hours-no-cons-${g.id}`,
         type: 'anomalie',
@@ -371,14 +370,13 @@ function DashboardPage({ onNavigate }) {
         group_label: g.label,
         site_name: g.site_name,
         title: `Groupe ${g.label} — delta horaire sans consommation horaire`,
-        subtitle: `Delta horaire moyen : ${g.avg_hours.toFixed(1)} h — mais aucune consommation horaire calculable (consommation totale nulle sur la période). Vérifier les relevés de carburant associés.`,
+        subtitle: `Ce groupe enregistre un delta horaire (${(g.latest_hours || g.avg_hours).toFixed(1)} h) mais aucune consommation de carburant associée. Vérifier la jauge et la saisie des consommations.`,
         is_infinite_consumption: false,
       }))
 
-    // --- CAS 3 : Groupes sans delta horaire mais avec consommation (n'ont pas fonctionné mais ont consommé) ---
-    // is_infinite_consumption == true : consommation détectée mais 0 h de fonctionnement enregistrée
+    // --- CAS 3 : Groupes qui ont consommé du carburant mais n'ont PAS de delta horaire enregistré ---
     const groupWithConsNoHours = groupRows
-      .filter((g) => g.is_infinite_consumption)
+      .filter((g) => g.is_infinite_consumption || (g.latest_consumption > 0 && g.latest_hours === 0) || (g.avg_consumption > 0 && g.avg_hours === 0))
       .map((g) => ({
         id: `group-cons-no-hours-${g.id}`,
         type: 'anomalie',
@@ -389,24 +387,35 @@ function DashboardPage({ onNavigate }) {
         group_id: g.id,
         group_label: g.label,
         site_name: g.site_name,
-        title: `Groupe ${g.label} — consommation sans fonctionnement enregistré`,
-        subtitle: `Consommation moyenne de ${g.avg_consumption.toFixed(1)} L détectée mais aucun delta horaire (0 h). Le groupe a consommé du carburant sans heures de fonctionnement enregistrées — vérifier le compteur ou les saisies.`,
+        title: `Groupe ${g.label} — consommation sans heures de fonctionnement`,
+        subtitle: `Consommation enregistrée (${(g.latest_consumption || g.avg_consumption).toFixed(1)} L) mais aucun delta horaire (0 h). Le groupe consomme du carburant sans tourner — anomalie de compteur ou fuite suspectée.`,
         is_infinite_consumption: true,
       }))
 
-    // --- CAS 4 : Groupes avec écart > 15% de consommation horaire semaine N vs moyenne ---
+    // --- CAS 4 : Groupes ayant un écart > 15% (consommation horaire semaine N vs moyenne, ou variance > 15%) ---
     const SEUIL_ECART = 15.0
     const groupWithHighVariance = groupRows
       .filter((g) => {
-        if (g.latest_hourly_consumption == null) return false
-        if (!g.mean_hourly_consumption_deduite || g.mean_hourly_consumption_deduite === 0) return false
-        const ecart = Math.abs((g.latest_hourly_consumption - g.mean_hourly_consumption_deduite) / g.mean_hourly_consumption_deduite) * 100
-        return ecart > SEUIL_ECART
+        if (g.latest_hourly_consumption != null && g.mean_hourly_consumption_deduite > 0) {
+          const ecart = Math.abs((g.latest_hourly_consumption - g.mean_hourly_consumption_deduite) / g.mean_hourly_consumption_deduite) * 100
+          return ecart > SEUIL_ECART
+        }
+        return g.variance_pct > SEUIL_ECART
       })
       .map((g) => {
-        const ecart = ((g.latest_hourly_consumption - g.mean_hourly_consumption_deduite) / g.mean_hourly_consumption_deduite) * 100
-        const sign = ecart >= 0 ? '▲' : '▼'
-        const absEcart = Math.abs(ecart).toFixed(1)
+        let titleText = ''
+        let subtitleText = ''
+        if (g.latest_hourly_consumption != null && g.mean_hourly_consumption_deduite > 0) {
+          const ecart = ((g.latest_hourly_consumption - g.mean_hourly_consumption_deduite) / g.mean_hourly_consumption_deduite) * 100
+          const sign = ecart >= 0 ? '▲' : '▼'
+          const absEcart = Math.abs(ecart).toFixed(1)
+          titleText = `Groupe ${g.label} — écart consommation horaire ${sign}${absEcart}% (semaine N)`
+          subtitleText = `Consommation horaire semaine N : ${g.latest_hourly_consumption.toFixed(2)} L/h — Moyenne habituelle : ${g.mean_hourly_consumption_deduite.toFixed(2)} L/h — Écart de ${sign}${absEcart}% (seuil : ${SEUIL_ECART}%).`
+        } else {
+          const sign = '▲'
+          titleText = `Groupe ${g.label} — écart de consommation ${sign}${g.variance_pct.toFixed(1)}%`
+          subtitleText = `Consommation moyenne : ${g.avg_consumption.toFixed(1)} L — Consommation dernière période : ${g.latest_consumption.toFixed(1)} L — Variance observée : ${sign}${g.variance_pct.toFixed(1)}%.`
+        }
         return {
           id: `group-variance-${g.id}`,
           type: 'ecart',
@@ -417,13 +426,19 @@ function DashboardPage({ onNavigate }) {
           group_id: g.id,
           group_label: g.label,
           site_name: g.site_name,
-          title: `Groupe ${g.label} — écart consommation horaire ${sign}${absEcart}% (semaine N)`,
-          subtitle: `Semaine N : ${g.latest_hourly_consumption.toFixed(2)} L/h — Moyenne habituelle : ${g.mean_hourly_consumption_deduite.toFixed(2)} L/h — Écart ${sign}${absEcart}% (seuil : ${SEUIL_ECART}%). Vérifier le fonctionnement du groupe.`,
+          title: titleText,
+          subtitle: subtitleText,
           is_infinite_consumption: false,
         }
       })
 
-    const combined = [...autonomyAlerts, ...groupWithConsNoHours, ...groupWithHoursNoConsumption, ...groupWithHighVariance]
+    // Éliminer d'éventuels doublons par ID
+    const alertMap = new Map()
+    ;[...autonomyAlerts, ...groupWithConsNoHours, ...groupWithHoursNoConsumption, ...groupWithHighVariance].forEach((item) => {
+      if (!alertMap.has(item.id)) alertMap.set(item.id, item)
+    })
+
+    const combined = Array.from(alertMap.values())
 
     return combined.sort((a, b) => {
       const rank = { critical: 3, medium: 2, low: 1 }
@@ -655,7 +670,7 @@ function DashboardPage({ onNavigate }) {
                     <td style={{ textAlign: 'left' }}>{row.site_name || row.label}</td>
                     <td style={{ textAlign: 'right' }}><strong>{formatValue(row.avg_consumption, ' L')}</strong></td>
                     <td style={{ textAlign: 'right' }}>{formatValue(row.latest_consumption, ' L')}</td>
-                    <td style={{ textAlign: 'center' }}>{renderDeviation(row.avg_consumption, siteAverageConsumption, '—')}</td>
+                    <td style={{ textAlign: 'center' }}>{renderConsumptionGapVsAvg(row.latest_consumption, row.avg_consumption, '—')}</td>
                   </tr>
                 ))}
                 {topConsumerSiteRows.length === 0 && (
