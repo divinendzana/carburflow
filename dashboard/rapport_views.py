@@ -5,11 +5,16 @@ from rest_framework.views import APIView
 from django.http import HttpResponse
 from drf_spectacular.utils import extend_schema
 
+from django.shortcuts import get_object_or_404
+
 from dashboard.models import Rapport
 from dashboard.norme import (
     NORME_COLUMNS,
     NORME_META,
+    ImportValidationError,
     build_csv_bytes,
+    build_rapport_csv_bytes,
+    build_rapport_xlsx_bytes,
     build_xlsx_bytes,
     import_report_rows,
     rows_from_csv,
@@ -17,6 +22,12 @@ from dashboard.norme import (
 )
 from dashboard.permissions import user_is_admin
 from dashboard.serializers import RapportSerializer
+
+
+def _user_can_access_rapport(user, rapport: Rapport) -> bool:
+    if user_is_admin(user):
+        return True
+    return rapport.created_by_id == getattr(user, 'id', None)
 
 
 class NormeMetaAPIView(APIView):
@@ -79,21 +90,51 @@ class RapportUploadAPIView(APIView):
                 rows = rows_from_csv(raw)
             else:
                 return Response(
-                    {'detail': 'Format non supporté. Utilisez .xlsx ou .csv.'},
+                    {
+                        'detail': 'Ce type de fichier n’est pas accepté.',
+                        'errors': [
+                            {
+                                'row': None,
+                                'column': None,
+                                'column_label': None,
+                                'message': f'Le fichier « {filename} » n’est pas un Excel ou un CSV.',
+                                'how_to_fix': 'Choisissez un fichier se terminant par .xlsx ou .csv (modèle de l’étape 1).',
+                            }
+                        ],
+                    },
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
             rapport, imported = import_report_rows(rows, request.user)
             return Response(
                 {
-                    'detail': f'{imported} ligne(s) importée(s).',
+                    'detail': (
+                        f'C’est bon : {imported} ligne(s) ont été enregistrée(s). '
+                        'Vous pouvez les retrouver plus bas dans la liste.'
+                    ),
                     'rapport': RapportSerializer(rapport).data,
                 },
                 status=status.HTTP_201_CREATED,
             )
+        except ImportValidationError as exc:
+            return Response(exc.as_dict(), status=status.HTTP_400_BAD_REQUEST)
         except Exception as exc:
             return Response(
-                {'detail': str(exc)},
+                {
+                    'detail': 'Le fichier n’a pas pu être importé.',
+                    'errors': [
+                        {
+                            'row': None,
+                            'column': None,
+                            'column_label': None,
+                            'message': str(exc),
+                            'how_to_fix': (
+                                'Vérifiez que vous utilisez le modèle téléchargé, '
+                                'puis recommencez. Si le problème continue, contactez un responsable.'
+                            ),
+                        }
+                    ],
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -103,10 +144,15 @@ class MesRapportsAPIView(APIView):
 
     @extend_schema(tags=['Rapports'], summary='Rapports visibles selon le rôle')
     def get(self, request):
-        qs = Rapport.objects.all().order_by('-date_fin', '-id')
-        return Response(RapportSerializer(qs[:50], many=True).data)
-
-
+        qs = (
+            Rapport.objects.all()
+            .select_related('created_by')
+            .prefetch_related('lignes')
+            .order_by('-date_fin', '-id')
+        )
+        if not user_is_admin(request.user):
+            qs = qs.filter(created_by=request.user)
+        return Response(RapportSerializer(qs[:100], many=True).data)
 
 
 class SoumissionsAPIView(APIView):
@@ -114,4 +160,66 @@ class SoumissionsAPIView(APIView):
 
     @extend_schema(tags=['Rapports'], summary='Historique des soumissions de rapports')
     def get(self, request):
-        return Response([])  # Renvoie une liste vide pour éviter le 'Non trouvé'
+        qs = (
+            Rapport.objects.all()
+            .select_related('created_by')
+            .prefetch_related('lignes')
+            .order_by('-id')
+        )
+        if not user_is_admin(request.user):
+            qs = qs.filter(created_by=request.user)
+
+        items = []
+        for rapport in qs[:100]:
+            user = rapport.created_by
+            username = None
+            if user:
+                full = f'{user.first_name} {user.last_name}'.strip()
+                username = full or user.username
+            rows = rapport.lignes.count()
+            items.append({
+                'id': rapport.id,
+                'created_at': f'{rapport.date_fin}T12:00:00',
+                'date_debut': rapport.date_debut,
+                'date_fin': rapport.date_fin,
+                'filename': f'Rapport #{rapport.id}',
+                'status': 'success',
+                'rows_imported': rows,
+                'username': username,
+                'message': f'{rows} ligne(s) importée(s).',
+            })
+        return Response(items)
+
+
+class RapportExportAPIView(APIView):
+    """Téléchargement d'un rapport importé (admin: tous ; opérateur: les siens)."""
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(tags=['Rapports'], summary='Exporter un rapport importé (xlsx ou csv)')
+    def get(self, request, rapport_id, export_format):
+        rapport = get_object_or_404(
+            Rapport.objects.select_related('created_by').prefetch_related('lignes'),
+            pk=rapport_id,
+        )
+        if not _user_can_access_rapport(request.user, rapport):
+            return Response({'detail': 'Accès refusé.'}, status=status.HTTP_403_FORBIDDEN)
+
+        fmt = (export_format or '').lower()
+        if fmt == 'xlsx':
+            content = build_rapport_xlsx_bytes(rapport)
+            content_type = (
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+        elif fmt == 'csv':
+            content = build_rapport_csv_bytes(rapport)
+            content_type = 'text/csv; charset=utf-8'
+        else:
+            return Response(
+                {'detail': 'Format non supporté. Utilisez xlsx ou csv.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        filename = f'carburflow_rapport_{rapport.id}.{fmt}'
+        response = HttpResponse(content, content_type=content_type)
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response

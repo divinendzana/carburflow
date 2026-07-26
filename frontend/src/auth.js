@@ -27,6 +27,12 @@ export function clearAuth() {
 function extractErrorMessage(data) {
   if (!data) return null
   if (typeof data.detail === 'string') return data.detail
+  if (Array.isArray(data.errors) && data.errors.length) {
+    const n = data.errors.length
+    return n === 1
+      ? 'Il y a 1 point à corriger dans votre fichier.'
+      : `Il y a ${n} points à corriger dans votre fichier.`
+  }
   if (Array.isArray(data.non_field_errors) && data.non_field_errors[0]) {
     return data.non_field_errors[0]
   }
@@ -51,7 +57,7 @@ export async function apiFetch(path, options = {}) {
     response = await fetch(path, { ...options, headers })
   } catch {
     throw new Error(
-      'Impossible de joindre le serveur. Vérifiez que l’API Django tourne sur le port 8001 (python3 manage.py runserver 8001).',
+      'Impossible de joindre le serveur pour le moment. Réessayez dans un instant.',
     )
   }
 
@@ -59,7 +65,7 @@ export async function apiFetch(path, options = {}) {
   const contentType = response.headers.get('content-type') || ''
   if (response.status === 502 || response.status === 503 || response.status === 504) {
     throw new Error(
-      'API indisponible (backend arrêté). Démarrez Django : python3 manage.py runserver 8001',
+      'Le service est temporairement indisponible. Réessayez dans un instant.',
     )
   }
 
@@ -84,7 +90,7 @@ export async function apiFetch(path, options = {}) {
       // Réponse non-JSON (souvent HTML d’erreur proxy Vite si Django est down)
       if (!response.ok || text.includes('ECONNREFUSED') || text.includes('proxy error')) {
         throw new Error(
-          'API indisponible (backend arrêté). Démarrez Django : python3 manage.py runserver 8001',
+          'Le service est temporairement indisponible. Réessayez dans un instant.',
         )
       }
       data = { detail: text }
@@ -95,11 +101,12 @@ export async function apiFetch(path, options = {}) {
     const error = new Error(
       extractErrorMessage(data)
         || (response.status >= 500
-          ? 'API indisponible (backend arrêté). Démarrez Django : python3 manage.py runserver 8001'
+          ? 'Le serveur ne répond pas pour le moment. Réessayez dans un instant.'
           : 'Une erreur est survenue.'),
     )
     error.status = response.status
     error.data = data
+    error.errors = Array.isArray(data?.errors) ? data.errors : []
     throw error
   }
   return data
@@ -145,17 +152,29 @@ export async function publicSitesRequest() {
   return apiFetch('/api/v1/auth/sites')
 }
 
-export async function downloadNorme(format = 'xlsx') {
-  const response = await apiFetch(`/api/v1/rapports/norme.${format}`, { raw: true })
+async function triggerBlobDownload(response, filename) {
   const blob = await response.blob()
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
-  a.download = `carburflow_norme_rapport.${format}`
+  a.download = filename
   document.body.appendChild(a)
   a.click()
   a.remove()
   URL.revokeObjectURL(url)
+}
+
+export async function downloadNorme(format = 'xlsx') {
+  const response = await apiFetch(`/api/v1/rapports/norme.${format}`, { raw: true })
+  await triggerBlobDownload(response, `carburflow_norme_rapport.${format}`)
+}
+
+export async function downloadRapport(rapportId, format = 'xlsx') {
+  const response = await apiFetch(
+    `/api/v1/rapports/${rapportId}/export.${format}`,
+    { raw: true },
+  )
+  await triggerBlobDownload(response, `carburflow_rapport_${rapportId}.${format}`)
 }
 
 export async function uploadRapport(file) {

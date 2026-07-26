@@ -33,9 +33,32 @@ class GroupeElectrogeneSerializer(serializers.ModelSerializer):
 
 
 class RapportSerializer(serializers.ModelSerializer):
+    created_by_username = serializers.SerializerMethodField()
+    lignes_count = serializers.SerializerMethodField()
+
     class Meta:
         model = Rapport
-        fields = ['id', 'date_debut', 'date_fin']
+        fields = [
+            'id',
+            'date_debut',
+            'date_fin',
+            'created_by',
+            'created_by_username',
+            'lignes_count',
+        ]
+
+    def get_created_by_username(self, obj):
+        user = getattr(obj, 'created_by', None)
+        if not user:
+            return None
+        full = f'{user.first_name} {user.last_name}'.strip()
+        return full or user.username
+
+    def get_lignes_count(self, obj):
+        # Utilise le prefetch si présent
+        if hasattr(obj, '_prefetched_objects_cache') and 'lignes' in obj._prefetched_objects_cache:
+            return len(obj.lignes.all())
+        return obj.lignes.count()
 
 
 class LigneRapportSerializer(serializers.ModelSerializer):

@@ -19,7 +19,9 @@ from dashboard.rapport_views import (
     NormeCsvAPIView,
     NormeMetaAPIView,
     NormeXlsxAPIView,
+    RapportExportAPIView,
     RapportUploadAPIView,
+    SoumissionsAPIView,
 )
 from dashboard.views import (
     CuvePrincipaleViewSet,
@@ -57,6 +59,12 @@ urlpatterns = [
     path('rapports/norme.xlsx', NormeXlsxAPIView.as_view(), name='api-norme-xlsx'),
     path('rapports/upload', RapportUploadAPIView.as_view(), name='api-rapport-upload'),
     path('rapports/mes', MesRapportsAPIView.as_view(), name='api-rapports-mes'),
+    path('rapports/soumissions', SoumissionsAPIView.as_view(), name='api-rapports-soumissions'),
+    path(
+        'rapports/<int:rapport_id>/export.<str:export_format>',
+        RapportExportAPIView.as_view(),
+        name='api-rapport-export',
+    ),
 
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
     path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),

@@ -29,6 +29,10 @@ export default defineConfig(({ mode }) => {
         '.use.devtunnels.ms',
         '.devtunnels.ms',
         '.trycloudflare.com',
+        '.ngrok-free.app',
+        '.ngrok-free.dev',
+        '.ngrok.app',
+        '.ngrok.io',
       ],
       ...(tunnel
         ? {
