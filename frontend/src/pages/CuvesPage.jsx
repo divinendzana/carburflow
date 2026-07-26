@@ -283,7 +283,7 @@ function CuvesPage({ onNavigate }) {
                   </div>
                   <div className="cuve-metric-layout">
                     <div className="metric-stat-block wide-metric-block">
-                      <span className="curve-title">Volume carburant</span>
+                      <span className="curve-title">Volume stock</span>
                       <div className="group-stats wide-stats-grid">
                         <div>
                           <span>{METRIC_LABELS.totalPeriod}</span>
@@ -307,7 +307,7 @@ function CuvesPage({ onNavigate }) {
                     </div>
                   </div>
                   <div className="chart-card">
-                    <span className="curve-title">Évolution du niveau (litres)</span>
+                    <span className="curve-title">Courbe volume stock</span>
                     <div className="chart-box small-box"><canvas id={`chart-cuve-principale-${block.id}`} /></div>
                   </div>
                 </article>
@@ -357,7 +357,7 @@ function CuvesPage({ onNavigate }) {
                   </div>
                   <div className="cuve-metric-layout">
                     <div className="metric-stat-block wide-metric-block">
-                      <span className="curve-title">Volume carburant</span>
+                      <span className="curve-title">Volume stock</span>
                       <div className="group-stats wide-stats-grid">
                         <div>
                           <span>{METRIC_LABELS.totalPeriod}</span>
@@ -381,7 +381,7 @@ function CuvesPage({ onNavigate }) {
                     </div>
                   </div>
                   <div className="chart-card">
-                    <span className="curve-title">Évolution du niveau (litres)</span>
+                    <span className="curve-title">Courbe volume stock</span>
                     <div className="chart-box small-box"><canvas id={`chart-cuve-journaliere-${block.id}`} /></div>
                   </div>
                 </article>

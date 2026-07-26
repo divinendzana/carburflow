@@ -573,9 +573,9 @@ class DashboardOverviewAPIView(APIView):
         for site in site_rows:
             if _site_is_critical(site):
                 if site['formatted_autonomy']:
-                    autonomy_text = f"Autonomie estimée à {site['formatted_autonomy']}"
+                    autonomy_text = f"Temps restant : {site['formatted_autonomy']}"
                 else:
-                    autonomy_text = f"Autonomie estimée à {site['autonomy']} périodes"
+                    autonomy_text = f"Temps restant : {site['autonomy']} périodes"
                 alerts.append({
                     'id': f"site-{site['id']}",
                     'type': 'site_autonomy',
@@ -584,8 +584,8 @@ class DashboardOverviewAPIView(APIView):
                     'priority_level': 'urgent',
                     'site_id': site['id'],
                     'site_name': site['site_name'],
-                    'title': f"Site {site['site_name']} : autonomie critique",
-                    'subtitle': f"{autonomy_text} avec une consommation moyenne de {site['avg_consumption']:.1f} L.",
+                    'title': f"Site {site['site_name']} : temps restant critique",
+                    'subtitle': f"{autonomy_text} — consommation moyenne {site['avg_consumption']:.1f} L.",
                 })
 
         for group in group_rows:
@@ -601,12 +601,12 @@ class DashboardOverviewAPIView(APIView):
                     'group_id': group['id'],
                     'group_label': group['label'],
                     'site_name': group['site_name'],
-                    'title': f"Groupe {group['label']} : consommation anormale",
+                    'title': f"Groupe {group['label']} : écart de consommation horaire",
                     'subtitle': (
-                        f"Écart de {sign}{abs(variance):.1f}% entre la consommation horaire déduite "
-                        f"({group['mean_hourly_consumption_deduite']:.2f} L/h) et la consommation horaire réelle "
-                        f"({group['mean_hourly_consumption']:.2f} L/h). Consommation moyenne du groupe : "
-                        f"{group['avg_consumption']:.1f} L."
+                        f"Écart de {sign}{abs(variance):.1f}% entre la consommation horaire moyenne "
+                        f"({group['mean_hourly_consumption_deduite']:.2f} L/h) et la consommation horaire semaine N "
+                        f"({(group['latest_hourly_consumption'] if group['latest_hourly_consumption'] is not None else group['mean_hourly_consumption']):.2f} L/h). "
+                        f"Consommation moyenne du groupe : {group['avg_consumption']:.1f} L."
                     ),
                 })
 

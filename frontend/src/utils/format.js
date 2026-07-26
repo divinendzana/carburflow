@@ -1,5 +1,5 @@
 /**
- * Formate un nombre d'heures d'autonomie en chaîne lisible.
+ * Formate un nombre d'heures de temps restant en chaîne lisible.
  * Ex. 14 → "14 h", 54 → "2 j 6 h"
  */
 export function formatAutonomy(hours) {
@@ -15,12 +15,12 @@ export function formatAutonomy(hours) {
 }
 
 /**
- * Niveau d'autonomie pour l'UI : critical | medium | low | ok | unknown
- * - critical : < 24h ou consommation sans heures (0 h)
+ * Niveau de temps restant pour l'UI : critical | medium | low | ok | unknown
+ * - critical : < 24h ou consommation sans delta horaire (0 h)
  * - medium   : 24–36 h
  * - low      : 36–72 h
  * - ok       : ≥ 72 h
- * - unknown  : pas assez de données (ex-symbole ∞ côté API)
+ * - unknown  : pas assez de données
  */
 export function getAutonomySeverity(entity = {}) {
   if (entity.is_infinite_consumption) return 'critical'
@@ -64,27 +64,38 @@ export function formatAutonomyValue(entity = {}) {
  */
 export function getAutonomyHint(entity = {}) {
   if (entity.is_infinite_consumption) {
-    return 'Consommation détectée sans heures de fonctionnement : stock à risque.'
+    return 'Consommation détectée sans delta horaire : stock à risque.'
   }
   if (entity.is_infinite_autonomy || entity.formatted_autonomy === '∞') {
-    return 'Pas assez de données pour estimer le temps restant avant rupture.'
+    return 'Pas assez de données pour calculer le temps restant avant rupture.'
   }
   const severity = getAutonomySeverity(entity)
-  if (severity === 'critical') return 'Moins de 24 heures estimées — action rapide recommandée.'
-  if (severity === 'medium') return 'Entre 24 et 36 heures estimées — à surveiller de près.'
-  if (severity === 'low') return 'Entre 36 et 72 heures estimées — planifiez un réapprovisionnement.'
-  if (severity === 'ok') return 'Plus de 72 heures estimées — situation confortable.'
-  return 'Autonomie non disponible pour le moment.'
+  if (severity === 'critical') return 'Moins de 24 heures de temps restant — action rapide recommandée.'
+  if (severity === 'medium') return 'Entre 24 et 36 heures de temps restant — à surveiller de près.'
+  if (severity === 'low') return 'Entre 36 et 72 heures de temps restant — planifiez un réapprovisionnement.'
+  if (severity === 'ok') return 'Plus de 72 heures de temps restant — situation confortable.'
+  return 'Temps restant non disponible pour le moment.'
 }
 
-/** Libellés métier partagés (éviter le jargon stats). */
+/**
+ * Libellés métier partagés — jargon Groupes.
+ * Consommation horaire · Consommation · Delta horaire · Temps restant
+ */
 export const METRIC_LABELS = {
-  totalPeriod: 'Total sur la période',
-  averagePeriod: 'Moyenne sur la période',
-  habitualAverage: 'Moyenne habituelle',
-  variability: 'Variabilité',
-  hoursMean: 'Heures (moyenne)',
-  consumptionMean: 'Conso. moyenne (litres)',
-  autonomyRemaining: 'Temps restant estimé',
+  totalPeriod: 'Total sur la période de la courbe',
+  averagePeriod: 'Moyenne',
+  habitualAverage: 'Moyenne',
+  variability: 'Écart-type',
+  hoursMean: 'Delta horaire moy. (h)',
+  consumptionMean: 'Consommation moyenne (L)',
+  hourlyConsumptionMean: 'Consommation horaire moy. (L/h)',
+  consumptionWeekN: 'Consommation semaine N (L)',
+  hoursDeltaMean: 'Delta horaire moyen (h)',
+  autonomyRemaining: 'Temps restant',
   noPreviousPeriod: 'Pas de période précédente pour comparer',
+  consumption: 'Consommation',
+  hourlyConsumption: 'Consommation horaire',
+  hoursDelta: 'Delta horaire',
+  consumptionWeekN1: 'Consommation semaine N-1 (L)',
+  hoursDeltaWeekN: 'Delta horaire semaine N (h)',
 }

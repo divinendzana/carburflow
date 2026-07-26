@@ -177,7 +177,7 @@ function DashboardPage({ onNavigate }) {
     // potentiellement nulle : ça doit apparaître dans les faibles autonomies, pas
     // être ignoré).
     if (site.is_infinite_consumption) {
-      return { type: 'critique', priority: 'urgent', label: 'Autonomie critique (0h — pas de données de consommation)' }
+      return { type: 'critique', priority: 'urgent', label: 'Temps restant critique (0 h — consommation sans delta horaire)' }
     }
     // ∞ = pas de données -> IGNORER (pas d'alerte)
     if (site.is_infinite_autonomy) {
@@ -186,10 +186,10 @@ function DashboardPage({ onNavigate }) {
     // Autonomie finie
     if (site.autonomie_hours != null) {
       if (site.autonomie_hours < 24) {
-        return { type: 'critique', priority: 'urgent', label: 'Autonomie critique (<24h)' }
+        return { type: 'critique', priority: 'urgent', label: 'Temps restant critique (< 24 h)' }
       }
       if (site.autonomie_hours < 36) {
-        return { type: 'alerte', priority: 'warning', label: 'Autonomie faible (<36h)' }
+        return { type: 'alerte', priority: 'warning', label: 'Temps restant faible (< 36 h)' }
       }
     }
     return null
@@ -221,15 +221,15 @@ function DashboardPage({ onNavigate }) {
       {
         label: 'Sites urgents',
         title: `${criticalAutonomySites}`,
-        detail: 'Moins de 24 h de stock estimé',
+        detail: 'Moins de 24 h de temps restant',
       },
       {
         label: 'Anomalies groupes',
         title: `${abnormalGroups}`,
-        detail: 'Consommation inhabituelle détectée',
+        detail: 'Écart de consommation horaire détecté',
       },
       {
-        label: 'Carburant consommé',
+        label: 'Consommation',
         title: formatValue(totalConsumption, ' L'),
         detail: 'Sur la dernière période analysée',
         deviation: {
@@ -239,9 +239,9 @@ function DashboardPage({ onNavigate }) {
         },
       },
       {
-        label: 'Heures de marche',
+        label: 'Delta horaire',
         title: formatValue(totalRuntime, ' h'),
-        detail: 'Total des heures enregistrées',
+        detail: 'Total du delta horaire enregistré',
         deviation: {
           value: runtimeDeviation,
           isNegative: runtimeDeviation !== null && runtimeDeviation < 0,
@@ -305,8 +305,8 @@ function DashboardPage({ onNavigate }) {
         // Seulement pour les sites avec 0h
         if (!site.is_infinite_consumption) return null
         
-        const title = `Site ${site.site_name} : consommation sans heures de fonctionnement`
-        const subtitle = `Le site consomme du carburant sans heures de fonctionnement enregistrées avec une consommation moyenne de ${site.avg_consumption} L.`
+        const title = `Site ${site.site_name} : consommation sans delta horaire`
+        const subtitle = `Consommation détectée sans delta horaire — consommation moyenne ${site.avg_consumption} L.`
         
         return {
           id: `site-anormal-${site.id}`,
@@ -342,8 +342,8 @@ function DashboardPage({ onNavigate }) {
             severity: 'critical',
             site_id: site.id,
             site_name: site.site_name,
-            title: `Site ${site.site_name} : autonomie critique`,
-            subtitle: `Autonomie estimée à ${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)} avec une consommation moyenne de ${site.avg_consumption} L.`,
+            title: `Site ${site.site_name} : temps restant critique`,
+            subtitle: `Temps restant : ${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)} — consommation moyenne ${site.avg_consumption} L.`,
             is_infinite_consumption: false,
           }
         }
@@ -358,8 +358,8 @@ function DashboardPage({ onNavigate }) {
             severity: 'low',
             site_id: site.id,
             site_name: site.site_name,
-            title: `Site ${site.site_name} : autonomie à surveiller`,
-            subtitle: `Autonomie estimée à ${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)} avec une consommation moyenne de ${site.avg_consumption} L.`,
+            title: `Site ${site.site_name} : temps restant à surveiller`,
+            subtitle: `Temps restant : ${site.formatted_autonomy || formatAutonomy(site.autonomie_hours)} — consommation moyenne ${site.avg_consumption} L.`,
             is_infinite_consumption: false,
           }
         }
@@ -482,7 +482,7 @@ function DashboardPage({ onNavigate }) {
                 <tr>
                   <th style={{ textAlign: 'left' }}>Site</th>
                   <th style={{ textAlign: 'right' }}>Dernier stock</th>
-                  <th style={{ textAlign: 'center' }}>Temps restant estimé</th>
+                  <th style={{ textAlign: 'center' }}>Temps restant</th>
                 </tr>
               </thead>
               <tbody>
@@ -516,7 +516,7 @@ function DashboardPage({ onNavigate }) {
           <div className="metric-title-row">
             <div>
               <span className="metric-label">Anomalies</span>
-              <h3>Consommation inhabituelle</h3>
+              <h3>Écart de consommation horaire</h3>
             </div>
           </div>
           <div className="dashboard-table-scroll">
@@ -525,8 +525,8 @@ function DashboardPage({ onNavigate }) {
                 <tr>
                   <th style={{ textAlign: 'left' }}>Groupe</th>
                   <th style={{ textAlign: 'left' }}>Site</th>
-                  <th style={{ textAlign: 'right' }}>Conso. estimée (L/h)</th>
-                  <th style={{ textAlign: 'right' }}>Conso. mesurée (L/h)</th>
+                  <th style={{ textAlign: 'right' }}>Consommation horaire moyenne (L/h)</th>
+                  <th style={{ textAlign: 'right' }}>Consommation horaire semaine N (L/h)</th>
                   <th style={{ textAlign: 'center' }}>Écart</th>
                 </tr>
               </thead>
@@ -542,11 +542,11 @@ function DashboardPage({ onNavigate }) {
                     </td>
                     <td style={{ textAlign: 'right' }}>
                       {row.latest_hourly_consumption == null
-                        ? <span title="Consommation sans heures de marche enregistrées">Non dispo.</span>
-                        : formatValue(row.mean_hourly_consumption, ' L/h')}
+                        ? <span title="Consommation sans delta horaire">Non dispo.</span>
+                        : formatValue(row.latest_hourly_consumption, ' L/h')}
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      {renderDeviation(row.mean_hourly_consumption_deduite, row.mean_hourly_consumption, '—')}
+                      {renderDeviation(row.mean_hourly_consumption_deduite, row.latest_hourly_consumption, '—')}
                     </td>
                   </tr>
                 ))}
@@ -567,7 +567,7 @@ function DashboardPage({ onNavigate }) {
           <div className="metric-title-row">
             <div>
               <span className="metric-label">Consommation</span>
-              <h3>Groupes les plus gourmands</h3>
+              <h3>Groupes à plus forte consommation</h3>
             </div>
           </div>
           <div className="dashboard-table-scroll">
@@ -576,8 +576,8 @@ function DashboardPage({ onNavigate }) {
                 <tr>
                   <th style={{ textAlign: 'left' }}>Groupe</th>
                   <th style={{ textAlign: 'left' }}>Site</th>
-                  <th style={{ textAlign: 'right' }}>Conso. moyenne</th>
-                  <th style={{ textAlign: 'right' }}>Dernière conso.</th>
+                  <th style={{ textAlign: 'right' }}>Consommation moyenne</th>
+                  <th style={{ textAlign: 'right' }}>Consommation semaine N</th>
                   <th style={{ textAlign: 'center' }}>Écart</th>
                 </tr>
               </thead>
@@ -608,7 +608,7 @@ function DashboardPage({ onNavigate }) {
           <div className="metric-title-row">
             <div>
               <span className="metric-label">Consommation</span>
-              <h3>Sites les plus gourmands</h3>
+              <h3>Sites à plus forte consommation</h3>
             </div>
           </div>
           <div className="dashboard-table-scroll">
@@ -616,8 +616,8 @@ function DashboardPage({ onNavigate }) {
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left' }}>Site</th>
-                  <th style={{ textAlign: 'right' }}>Conso. moyenne</th>
-                  <th style={{ textAlign: 'right' }}>Dernière conso.</th>
+                  <th style={{ textAlign: 'right' }}>Consommation moyenne</th>
+                  <th style={{ textAlign: 'right' }}>Consommation semaine N</th>
                   <th style={{ textAlign: 'center' }}>Écart</th>
                 </tr>
               </thead>

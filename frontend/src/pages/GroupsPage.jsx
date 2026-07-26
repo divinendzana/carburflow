@@ -90,31 +90,6 @@ const buildHourlyConsumptionStats = (hours = [], consumption = []) => {
   }
 }
 
-const renderDelta = (metric, suffix = '') => {
-  if (metric?.has_previous_period === false) {
-    return <small className="delta-neutral">{METRIC_LABELS.noPreviousPeriod}</small>
-  }
-
-  const deltaValue = typeof metric?.variation_pct === 'number'
-    ? `${metric.variation_pct >= 0 ? '+' : ''}${metric.variation_pct.toFixed(1)} %`
-    : '—'
-  const deltaClass = (metric?.variation_pct ?? 0) >= 0 ? 'delta-up' : 'delta-down'
-  return <small className={deltaClass}>{deltaValue}{suffix}</small>
-}
-
-const renderMeanDelta = (metric, suffix = '') => {
-  if (metric?.has_previous_period === false) {
-    return <small className="delta-neutral">{METRIC_LABELS.noPreviousPeriod}</small>
-  }
-
-  const deltaValue = typeof metric?.mean_variation_pct === 'number'
-    ? `${metric.mean_variation_pct >= 0 ? '+' : ''}${metric.mean_variation_pct.toFixed(1)} %`
-    : '—'
-  const deltaClass = (metric?.mean_variation_pct ?? 0) >= 0 ? 'delta-up' : 'delta-down'
-  return <small className={deltaClass}>{deltaValue}{suffix}</small>
-}
-
-
 function GroupsPage({ onNavigate }) {
   const chartPalette = useChartPalette()
   const [groupsData, setGroupsData] = useState(null)
@@ -270,16 +245,32 @@ function GroupsPage({ onNavigate }) {
 
   const selectedSite = groupsData?.sites?.find((site) => String(site.id) === String(siteId)) ?? groupsData?.sites?.[0]
 
-  const siteHours = useMemo(() => {
-    const filtered = (groupsData?.group_blocks || []).filter((block) => !siteId || String(block.site_id) === String(siteId))
-    const values = filtered.flatMap((block) => block.hours_run || [])
-    return buildDerivedMetric(values)
-  }, [groupsData, siteId])
+  /** Agrégats site alignés sur les 3 blocs groupe (fenêtre période). */
+  const siteBlockStats = useMemo(() => {
+    const filtered = (groupsData?.group_blocks || []).filter(
+      (block) => !siteId || String(block.site_id) === String(siteId),
+    )
+    const seriesLen = (groupsData?.labels || []).length
+    const hoursAgg = Array.from({ length: seriesLen }, () => 0)
+    const consAgg = Array.from({ length: seriesLen }, () => 0)
 
-  const siteConsumption = useMemo(() => {
-    const values = (groupsData?.group_blocks || []).flatMap((block) => block.consumption || [])
-    return buildDerivedMetric(values)
-  }, [groupsData])
+    filtered.forEach((block) => {
+      ;(block.hours_run || []).forEach((value, index) => {
+        if (index < seriesLen) hoursAgg[index] += safeNum(value)
+      })
+      ;(block.consumption || []).forEach((value, index) => {
+        if (index < seriesLen) consAgg[index] += safeNum(value)
+      })
+    })
+
+    const hoursWindow = hoursAgg.slice(startIndex, endIndex + 1)
+    const consWindow = consAgg.slice(startIndex, endIndex + 1)
+    return {
+      hourly: buildHourlyConsumptionStats(hoursWindow, consWindow),
+      consumption: buildPeriodSeriesStats(consWindow),
+      hours: buildPeriodSeriesStats(hoursWindow),
+    }
+  }, [groupsData, siteId, startIndex, endIndex])
 
   if (initialLoading || !groupsData) {
     return (
@@ -351,24 +342,20 @@ function GroupsPage({ onNavigate }) {
             </div>
             <div className="summary-strip">
               <div className="summary-chip">
-                <span>Heures de marche (total)</span>
-                <strong>{siteHours.total?.toFixed(1) ?? '—'} h</strong>
-                {renderDelta(siteHours)}
+                <span>Consommation horaire moyenne</span>
+                <strong>{formatMetric(siteBlockStats.hourly.mean, 2)} L/h</strong>
               </div>
               <div className="summary-chip">
-                <span>Heures de marche (moyenne)</span>
-                <strong>{siteHours.mean?.toFixed(1) ?? '—'} h</strong>
-                {renderMeanDelta(siteHours)}
+                <span>Consommation semaine N</span>
+                <strong>{formatMetric(siteBlockStats.consumption.weekN)} L</strong>
               </div>
               <div className="summary-chip">
-                <span>Carburant consommé (total)</span>
-                <strong>{siteConsumption.total?.toFixed(1) ?? '—'} L</strong>
-                {renderDelta(siteConsumption)}
+                <span>Consommation totale (période)</span>
+                <strong>{formatMetric(siteBlockStats.consumption.total)} L</strong>
               </div>
               <div className="summary-chip">
-                <span>Carburant consommé (moyenne)</span>
-                <strong>{siteConsumption.mean?.toFixed(1) ?? '—'} L</strong>
-                {renderMeanDelta(siteConsumption)}
+                <span>Delta horaire moyen</span>
+                <strong>{formatMetric(siteBlockStats.hours.mean)} h</strong>
               </div>
             </div>
           </section>
@@ -387,8 +374,9 @@ function GroupsPage({ onNavigate }) {
                     <tr>
                       <th>Groupe</th>
                       <th>Site</th>
-                      <th>{METRIC_LABELS.hoursMean}</th>
-                      <th>{METRIC_LABELS.consumptionMean}</th>
+                      <th>{METRIC_LABELS.hourlyConsumptionMean}</th>
+                      <th>{METRIC_LABELS.consumptionWeekN}</th>
+                      <th>{METRIC_LABELS.hoursDeltaMean}</th>
                       <th>{METRIC_LABELS.autonomyRemaining}</th>
                     </tr>
                   </thead>
@@ -396,12 +384,18 @@ function GroupsPage({ onNavigate }) {
                     {(groupsData.group_blocks || []).map((g) => {
                       const siteName = g.site_nom || g.nom_site || g.site_name || (groupsData.sites || []).find((s) => String(s.id) === String(g.site_id))?.nom_site || ''
                       const severity = getAutonomySeverity(g)
+                      const hoursWindow = (g.hours_run || []).slice(startIndex, endIndex + 1)
+                      const consWindow = (g.consumption || []).slice(startIndex, endIndex + 1)
+                      const hourly = buildHourlyConsumptionStats(hoursWindow, consWindow)
+                      const consumption = buildPeriodSeriesStats(consWindow)
+                      const hours = buildPeriodSeriesStats(hoursWindow)
                       return (
                         <tr key={g.id} className={`autonomy-row autonomy-row--${severity}`}>
                           <td>{g.label}</td>
                           <td>{siteName}</td>
-                          <td>{g.hours?.mean?.toFixed(1) ?? '—'} h</td>
-                          <td>{g.consumption_stats?.mean?.toFixed(1) ?? '—'} L</td>
+                          <td>{formatMetric(hourly.mean, 2)}</td>
+                          <td>{formatMetric(consumption.weekN)}</td>
+                          <td>{formatMetric(hours.mean)}</td>
                           <td>
                             <div className={`autonomy-cell autonomy-cell--${severity}`} title={formatAutonomyValue(g)}>
                               <span className="autonomy-cell-value">{formatAutonomyValue(g)}</span>
@@ -427,7 +421,7 @@ function GroupsPage({ onNavigate }) {
                 return (
                   <div className={`group-autonomy-hero group-autonomy-hero--${severity}`}>
                     <div className="group-autonomy-hero-copy">
-                      <span className="group-autonomy-hero-kicker">Temps restant estimé</span>
+                      <span className="group-autonomy-hero-kicker">Temps restant</span>
                       <p className="group-autonomy-hero-hint">
                         Avant rupture de stock pour ce groupe, d’après les derniers relevés.
                       </p>
@@ -535,7 +529,7 @@ function GroupsPage({ onNavigate }) {
 
               <div className="group-curve-grid">
                 <div className="chart-card">
-                  <span className="curve-title">Courbe heures de fonctionnement</span>
+                  <span className="curve-title">Courbe delta horaire</span>
                   <div className="chart-box small-box"><canvas id={`chart-group-${group.id}-hours`} /></div>
                 </div>
                 <div className="chart-card">

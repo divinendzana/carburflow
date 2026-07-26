@@ -359,13 +359,13 @@ function SitesPage({ onNavigate }) {
                 <thead>
                   <tr>
                     <th>Site</th>
-                    <th>Heures (période)</th>
-                    <th>Heures (moyenne)</th>
-                    <th>Conso. (période, L)</th>
-                    <th>Conso. (moyenne, L)</th>
+                    <th>Delta horaire (période)</th>
+                    <th>Delta horaire moyen</th>
+                    <th>Consommation (période, L)</th>
+                    <th>Consommation moyenne (L)</th>
                     <th>Stock (période, L)</th>
-                    <th>Stock (moyenne, L)</th>
-                    <th>Temps restant estimé</th>
+                    <th>Stock moyen (L)</th>
+                    <th>Temps restant</th>
                   </tr>
                 </thead>
                   <tbody>
@@ -422,31 +422,31 @@ function SitesPage({ onNavigate }) {
                 marginBottom: '2rem'
               }}>
                 <article className="metric-panel site-metric-card">
-                  <span className="metric-label">Durée de fonctionnement</span>
-                  <h3>{selectedSite ? 'Durée comptabilisée' : 'Cumul durée '}</h3>
+                  <span className="metric-label">Delta horaire</span>
+                  <h3>{selectedSite ? 'Delta horaire' : 'Delta horaire cumulé'}</h3>
                   <div className="site-metric-stack">
-                    <div><span>Total période</span><strong>{siteHoursStats.total.toFixed(1)} h</strong>{renderDelta(siteHoursStats)}</div>
-                    <div><span>Moyenne</span><strong>{siteHoursStats.mean.toFixed(1)} h</strong>{renderMeanDelta(siteHoursStats)}</div>
+                    <div><span>Total sur la période de la courbe</span><strong>{siteHoursStats.total.toFixed(1)} h</strong>{renderDelta(siteHoursStats)}</div>
+                    <div><span>Delta horaire moyen</span><strong>{siteHoursStats.mean.toFixed(1)} h</strong>{renderMeanDelta(siteHoursStats)}</div>
                   </div>
                   <div className="chart-box secondary-box"><canvas id="chart-site-hours" /></div>
                 </article>
 
                 <article className="metric-panel site-metric-card">
                   <span className="metric-label">Consommation</span>
-                  <h3>{selectedSite ? 'Carburant consommé' : 'Cumul consommation'}</h3>
+                  <h3>{selectedSite ? 'Consommation' : 'Consommation cumulée'}</h3>
                   <div className="site-metric-stack">
-                    <div><span>Total période</span><strong>{siteConsumptionStats.total.toFixed(1)} L</strong>{renderDelta(siteConsumptionStats)}</div>
-                    <div><span>Moyenne</span><strong>{siteConsumptionStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteConsumptionStats)}</div>
+                    <div><span>Total sur la période de la courbe</span><strong>{siteConsumptionStats.total.toFixed(1)} L</strong>{renderDelta(siteConsumptionStats)}</div>
+                    <div><span>Consommation moyenne</span><strong>{siteConsumptionStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteConsumptionStats)}</div>
                   </div>
                   <div className="chart-box secondary-box"><canvas id="chart-site-consumption" /></div>
                 </article>
 
                 <article className="metric-panel site-metric-card">
-                  <span className="metric-label">Volume carburant</span>
-                  <h3>{selectedSite ? 'Volume total' : 'Cumul volume'}</h3>
+                  <span className="metric-label">Stock</span>
+                  <h3>{selectedSite ? 'Volume stock' : 'Volume stock cumulé'}</h3>
                   <div className="site-metric-stack">
-                    <div><span>Total période</span><strong>{siteVolumeStats.total.toFixed(1)} L</strong>{renderDelta(siteVolumeStats)}</div>
-                    <div><span>Moyenne</span><strong>{siteVolumeStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteVolumeStats)}</div>
+                    <div><span>Total sur la période de la courbe</span><strong>{siteVolumeStats.total.toFixed(1)} L</strong>{renderDelta(siteVolumeStats)}</div>
+                    <div><span>Volume moyen</span><strong>{siteVolumeStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteVolumeStats)}</div>
                   </div>
                   <div className="chart-box secondary-box"><canvas id="chart-site-volume" /></div>
                 </article>
