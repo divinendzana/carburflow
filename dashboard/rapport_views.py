@@ -191,6 +191,37 @@ class SoumissionsAPIView(APIView):
         return Response(items)
 
 
+class RapportDeleteAPIView(APIView):
+    """Suppression d'un rapport — réservée aux responsables.
+
+    Respecte le modèle Grinnel : LigneRapport.rapport est en CASCADE,
+    donc les lignes liées sont retirées avec le rapport (pas de migration).
+    """
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(tags=['Rapports'], summary='Supprimer un rapport (admin)')
+    def delete(self, request, rapport_id):
+        if not user_is_admin(request.user):
+            return Response(
+                {'detail': 'Seul un responsable peut supprimer un rapport.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        rapport = get_object_or_404(Rapport, pk=rapport_id)
+        rapport_pk = rapport.id
+        lignes = rapport.lignes.count()
+        rapport.delete()
+        return Response(
+            {
+                'detail': (
+                    f'Le rapport n°{rapport_pk} a été supprimé '
+                    f'({lignes} ligne(s) associée(s) retirée(s)).'
+                ),
+                'id': rapport_pk,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+
 class RapportExportAPIView(APIView):
     """Téléchargement d'un rapport importé (admin: tous ; opérateur: les siens)."""
     permission_classes = [IsAuthenticated]

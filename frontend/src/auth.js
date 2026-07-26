@@ -218,3 +218,9 @@ export async function updateLigneRapport(ligneId, payload) {
     body: JSON.stringify(payload),
   })
 }
+
+export async function deleteRapport(rapportId) {
+  return apiFetch(`/api/v1/rapports/${rapportId}/delete`, {
+    method: 'DELETE',
+  })
+}

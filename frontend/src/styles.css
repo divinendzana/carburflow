@@ -2326,6 +2326,17 @@ button {
   background: #ffedd5;
 }
 
+.reports-btn--danger {
+  background: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+  font-weight: 800;
+}
+
+.reports-btn--danger:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
 /* Modal édition rapport */
 .rapport-modal-backdrop {
   position: fixed;

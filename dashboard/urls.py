@@ -19,6 +19,7 @@ from dashboard.rapport_views import (
     NormeCsvAPIView,
     NormeMetaAPIView,
     NormeXlsxAPIView,
+    RapportDeleteAPIView,
     RapportExportAPIView,
     RapportUploadAPIView,
     SoumissionsAPIView,
@@ -63,6 +64,11 @@ urlpatterns = [
         'rapports/<int:rapport_id>/export.<str:export_format>',
         RapportExportAPIView.as_view(),
         name='api-rapport-export',
+    ),
+    path(
+        'rapports/<int:rapport_id>/delete',
+        RapportDeleteAPIView.as_view(),
+        name='api-rapport-delete',
     ),
 
     path('schema/', SpectacularAPIView.as_view(), name='schema'),
