@@ -222,7 +222,16 @@ function CuvesPage({ onNavigate }) {
                 </select>
               </div>
               <div className="filter-actions">
-                <button type="submit" className="filter-submit" disabled={filtering}>
+                <button
+                  type="submit"
+                  className={`filter-submit${(
+                    String(draftRapportDebut) !== String(rapportDebut)
+                    || String(draftRapportFin) !== String(rapportFin)
+                    || String(draftSiteId) !== String(siteId)
+                  ) ? ' is-dirty' : ''}`}
+                  disabled={filtering}
+                  aria-live="polite"
+                >
                   {filtering ? 'Filtrage…' : 'Appliquer'}
                 </button>
                 {siteId ? (

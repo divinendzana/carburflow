@@ -341,7 +341,17 @@ function SitesPage({ onNavigate }) {
             </select>
           </div>
           <div className="filter-actions">
-            <button type="submit" className="filter-submit" disabled={filtering}>
+            <button
+              type="submit"
+              className={`filter-submit${(
+                Number(draftStartIdx) !== Number(startIdx)
+                || Number(draftEndIdx) !== Number(endIdx)
+                || String(draftSiteId) !== String(siteId)
+                || String(draftMode) !== String(mode)
+              ) ? ' is-dirty' : ''}`}
+              disabled={filtering}
+              aria-live="polite"
+            >
               {filtering ? 'Filtrage…' : 'Appliquer'}
             </button>
           </div>
