@@ -21,6 +21,7 @@ from dashboard.serializers import (
     LigneRapportSerializer,
 )
 from dashboard.utils import calculs as calc
+from dashboard.analytics import GROUPE_COLORS, _period_stats
 
 # --- ViewSets REST Standard ---
 
@@ -712,4 +713,135 @@ class GroupesAPIView(APIView):
             'selected_rapport_debut': reports[0].id if reports else None,
             'selected_rapport_fin': reports[-1].id if reports else None,
             'selected_site_id': selected_site_id,
+        })
+
+
+class CuvesDashboardAPIView(APIView):
+    """API page Cuves — adaptée au modèle post-refonte (site = cuve principale)."""
+
+    def get(self, request):
+        reports = list(Rapport.objects.order_by('date_debut', 'id'))
+        labels = [
+            f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}"
+            for report in reports
+        ]
+        report_ids = [report.id for report in reports]
+        sites = list(CuvePrincipale.objects.prefetch_related('cuves_journaliere').order_by('id'))
+
+        selected_site_id = request.query_params.get('site_id')
+        try:
+            selected_site_id = int(selected_site_id) if selected_site_id not in (None, '') else None
+        except (TypeError, ValueError):
+            selected_site_id = None
+        if selected_site_id is None and sites:
+            selected_site_id = sites[0].id
+
+        selected_site = next((site for site in sites if site.id == selected_site_id), None)
+
+        debut_raw = request.query_params.get('rapport_debut')
+        fin_raw = request.query_params.get('rapport_fin')
+        try:
+            debut_id = int(debut_raw) if debut_raw not in (None, '') else None
+        except (TypeError, ValueError):
+            debut_id = None
+        try:
+            fin_id = int(fin_raw) if fin_raw not in (None, '') else None
+        except (TypeError, ValueError):
+            fin_id = None
+
+        start_idx = report_ids.index(debut_id) if debut_id in report_ids else 0
+        end_idx = report_ids.index(fin_id) if fin_id in report_ids else max(len(report_ids) - 1, 0)
+        if start_idx > end_idx:
+            start_idx, end_idx = end_idx, start_idx
+
+        lignes_all = list(
+            LigneRapport.objects.filter(rapport_id__in=report_ids)
+            .select_related('cuve_journaliere')
+            .only(
+                'rapport_id',
+                'cuve_principale_id',
+                'cuve_journaliere_id',
+                'quantite_gasoil_cuve_principale',
+                'quantite_gasoil_cuve_journaliere',
+            )
+        )
+
+        report_series = []
+        for report in reports:
+            principal_map = {}
+            journaliere_map = {}
+            for line in lignes_all:
+                if line.rapport_id != report.id:
+                    continue
+                if line.cuve_principale_id is not None:
+                    principal_map[line.cuve_principale_id] = float(
+                        line.quantite_gasoil_cuve_principale or 0.0
+                    )
+                if line.cuve_journaliere_id is not None:
+                    journaliere_map[line.cuve_journaliere_id] = float(
+                        line.quantite_gasoil_cuve_journaliere or 0.0
+                    )
+            report_series.append((principal_map, journaliere_map))
+
+        principal_blocks = []
+        journalier_blocks = []
+        site_principal_values = []
+        site_journalier_values = []
+
+        if selected_site:
+            principal_tanks = [selected_site] if (selected_site.capacite or 0) > 0 else []
+            journalier_tanks = [
+                cj for cj in selected_site.cuves_journaliere.all()
+                if (cj.capacite or 0) > 0
+            ]
+
+            for index, cp in enumerate(principal_tanks):
+                values = [series[0].get(cp.id, 0.0) for series in report_series]
+                principal_blocks.append({
+                    'id': cp.id,
+                    'label': f"CP #{cp.id} ({selected_site.identifiant})",
+                    'capacity': cp.capacite,
+                    'color': GROUPE_COLORS[index % len(GROUPE_COLORS)],
+                    'stats': _period_stats(values, start_idx, end_idx),
+                    'values': [round(v, 1) for v in values],
+                })
+
+            for index, cj in enumerate(journalier_tanks):
+                values = [series[1].get(cj.id, 0.0) for series in report_series]
+                journalier_blocks.append({
+                    'id': cj.id,
+                    'label': f"CJ #{cj.id} ({selected_site.identifiant})",
+                    'capacity': cj.capacite,
+                    'color': GROUPE_COLORS[index % len(GROUPE_COLORS)],
+                    'stats': _period_stats(values, start_idx, end_idx),
+                    'values': [round(v, 1) for v in values],
+                })
+
+            for principal_map, journaliere_map in report_series:
+                site_principal_values.append(
+                    sum(principal_map.get(cp.id, 0.0) for cp in principal_tanks)
+                )
+                site_journalier_values.append(
+                    sum(journaliere_map.get(cj.id, 0.0) for cj in journalier_tanks)
+                )
+
+        return Response({
+            'labels': labels,
+            'rapport_choices': [
+                {
+                    'id': report.id,
+                    'label': f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}",
+                }
+                for report in reports
+            ],
+            'selected_rapport_debut': report_ids[start_idx] if report_ids else None,
+            'selected_rapport_fin': report_ids[end_idx] if report_ids else None,
+            'selected_site_id': selected_site_id,
+            'sites': [{'id': site.id, 'nom_site': site.identifiant} for site in sites],
+            'site_principal_stats': _period_stats(site_principal_values, start_idx, end_idx)
+            if site_principal_values else _period_stats([], 0, 0),
+            'site_journalier_stats': _period_stats(site_journalier_values, start_idx, end_idx)
+            if site_journalier_values else _period_stats([], 0, 0),
+            'principal_blocks': principal_blocks,
+            'journalier_blocks': journalier_blocks,
         })

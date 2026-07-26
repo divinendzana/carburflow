@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Menu, X } from 'lucide-react'
-import logo from '../../../../logo/logo_clair_navbar.jpeg'
+import logo from '../../../../logo/logo_clair_navbar.svg'
 import { Button } from '@/components/ui/button'
 import { useAuth } from '@/context/AuthContext.jsx'
 import { cn } from '@/lib/utils'
@@ -33,11 +33,11 @@ function LandingNav({ onNavigate }) {
             <>
               {isAdmin && (
                 <Button variant="ghost" onClick={() => go('dashboard')}>
-                  Dashboard
+                  Tableau de bord
                 </Button>
               )}
               <Button variant="ghost" onClick={() => go('reports')}>
-                Rapports
+                Import
               </Button>
               <Button
                 variant="outline"
@@ -82,11 +82,11 @@ function LandingNav({ onNavigate }) {
             <>
               {isAdmin && (
                 <Button variant="ghost" className="justify-start" onClick={() => go('dashboard')}>
-                  Dashboard
+                  Tableau de bord
                 </Button>
               )}
               <Button variant="ghost" className="justify-start" onClick={() => go('reports')}>
-                Rapports
+                Import
               </Button>
               <Button
                 variant="outline"

@@ -30,8 +30,7 @@ from dashboard.views import (
     RapportViewSet,
     LigneRapportViewSet,
     SitesDashboardAPIView,
-
-
+    CuvesDashboardAPIView,
     DashboardOverviewAPIView,
     GroupesAPIView,
 )
@@ -74,4 +73,5 @@ urlpatterns = [
     path('dashboard/sites', SitesDashboardAPIView.as_view(), name='dashboard-sites'),
     path('dashboard/overview', DashboardOverviewAPIView.as_view(), name='dashboard-overview'),
     path('dashboard/groupes', GroupesAPIView.as_view(), name='dashboard-groupes'),
+    path('dashboard/cuves', CuvesDashboardAPIView.as_view(), name='dashboard-cuves'),
 ]

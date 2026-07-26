@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
+import WelcomeBanner from '../components/WelcomeBanner.jsx'
 import { apiFetch } from '../auth.js'
 import { formatAutonomy } from '../utils/format.js'
 
@@ -273,7 +274,10 @@ function SitesPage({ onNavigate }) {
     return (
       <div className="app-shell dashboard-shell">
         <Topbar activeView="sites" onNavigate={onNavigate} />
-        <main className="groups-grid"><div className="loading-state">Chargement des données du site...</div></main>
+        <main className="groups-grid">
+          <WelcomeBanner subtitle="Chargement des sites…" />
+          <div className="loading-state">Chargement des données du site...</div>
+        </main>
       </div>
     )
   }
@@ -283,6 +287,7 @@ function SitesPage({ onNavigate }) {
       <Topbar activeView="sites" onNavigate={onNavigate} />
 
       <main className="groups-grid">
+        <WelcomeBanner subtitle="Suivez les volumes, consommations et autonomies de chaque site." />
         <div className="groups-filter-bar">
           <div className="filter-field">
             <label htmlFor="site-start">Rapport début</label>

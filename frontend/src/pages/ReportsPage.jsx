@@ -1,5 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
+import WelcomeBanner from '../components/WelcomeBanner.jsx'
+import RapportEditModal from '../components/RapportEditModal.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import {
   downloadNorme,
@@ -136,7 +138,7 @@ function LoadingButton({
 }
 
 function ReportsPage({ onNavigate }) {
-  const { user, isAdmin } = useAuth()
+  const { isAdmin } = useAuth()
   const inputRef = useRef(null)
   const errorRef = useRef(null)
   const [dragging, setDragging] = useState(false)
@@ -152,6 +154,7 @@ function ReportsPage({ onNavigate }) {
   const [loadingList, setLoadingList] = useState(true)
   const [showAllColumns, setShowAllColumns] = useState(false)
   const [query, setQuery] = useState('')
+  const [editingRapportId, setEditingRapportId] = useState(null)
 
   const busy = uploading || Boolean(downloadingNorme) || Boolean(downloadingRapport)
 
@@ -291,17 +294,27 @@ function ReportsPage({ onNavigate }) {
           </div>
         )}
 
+        {isAdmin ? (
+          <WelcomeBanner variant="admin-import" />
+        ) : (
+          <WelcomeBanner
+            subtitle="Pas besoin d’être informaticien. Suivez les 3 cases ci-dessous, dans l’ordre."
+          />
+        )}
+
         <section className="reports-hero reports-hero--simple">
-          <div className="reports-stub-badge">Envoi des relevés</div>
-          <h1>Envoyer mon fichier de relevé</h1>
+          <div className="reports-stub-badge">
+            {isAdmin ? 'Import des relevés' : 'Envoi des relevés'}
+          </div>
+          <h2>
+            {isAdmin
+              ? 'Recevoir et corriger les fichiers'
+              : 'Envoyer mon fichier de relevé'}
+          </h2>
           <p>
-            Pas besoin d’être informaticien. Suivez simplement les 3 cases ci-dessous,
-            dans l’ordre.
-          </p>
-          <p className="reports-stub-meta">
-            Vous êtes connecté en tant que{' '}
-            <strong>{user?.full_name || user?.username}</strong>
-            {isAdmin ? ' (responsable)' : ' (opérateur)'}
+            {isAdmin
+              ? 'Téléchargez le modèle si besoin, puis suivez les envois des opérateurs. Vous pouvez aussi corriger un rapport déjà reçu.'
+              : 'Remplissez le modèle, déposez-le ici, puis corrigez-le si besoin depuis la liste plus bas.'}
           </p>
         </section>
 
@@ -582,6 +595,13 @@ function ReportsPage({ onNavigate }) {
                       >
                         CSV
                       </LoadingButton>
+                      <LoadingButton
+                        className="reports-btn--edit"
+                        disabled={busy}
+                        onClick={() => setEditingRapportId(r.id)}
+                      >
+                        Modifier
+                      </LoadingButton>
                     </div>
                   </article>
                 )
@@ -589,6 +609,14 @@ function ReportsPage({ onNavigate }) {
             </div>
           )}
         </section>
+
+        {editingRapportId != null && (
+          <RapportEditModal
+            rapportId={editingRapportId}
+            onClose={() => setEditingRapportId(null)}
+            onSaved={() => refresh({ silent: true })}
+          />
+        )}
       </main>
     </div>
   )

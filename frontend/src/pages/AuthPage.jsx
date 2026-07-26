@@ -4,6 +4,7 @@ import { publicSitesRequest } from '@/auth.js'
 import { SignInPage } from '@/components/ui/sign-in'
 import { SignUpPage } from '@/components/ui/sign-up'
 import { Button } from '@/components/ui/button'
+import logo from '../../../logo/logo_clair_navbar.svg'
 
 /* Login : contexte carburant / énergie (cuves, infrastructure) — même traitement photo que register */
 const LOGIN_HERO =
@@ -111,7 +112,15 @@ function AuthPage({ onNavigate, initialMode = 'login' }) {
 
   return (
     <div className="relative bg-background text-foreground">
-      <div className="absolute left-4 top-4 z-20 sm:left-6 sm:top-6">
+      <div className="absolute left-4 top-4 z-20 flex items-center gap-3 sm:left-6 sm:top-6">
+        <button
+          type="button"
+          onClick={() => onNavigate('home')}
+          className="flex items-center gap-2 rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <img src={logo} alt="CarburFlow" className="size-9 rounded-md object-cover" />
+          <span className="font-display text-base font-semibold text-petrol">CarburFlow</span>
+        </button>
         <Button variant="ghost" size="sm" onClick={() => onNavigate('home')}>
           ← Retour
         </Button>

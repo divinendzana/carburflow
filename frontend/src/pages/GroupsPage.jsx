@@ -1,7 +1,12 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
+import WelcomeBanner from '../components/WelcomeBanner.jsx'
 import { apiFetch } from '../auth.js'
-import { formatAutonomy } from '../utils/format.js'
+import {
+  formatAutonomyValue,
+  getAutonomySeverity,
+  getAutonomySeverityLabel,
+} from '../utils/format.js'
 
 const buildDerivedMetric = (values = []) => {
   const normalizedValues = (values || []).map((value) => (typeof value === 'number' ? value : 0)).filter((value) => value > 0)
@@ -200,6 +205,7 @@ function GroupsPage({ onNavigate }) {
       <div className="app-shell dashboard-shell">
         <Topbar activeView="groups" onNavigate={onNavigate} />
         <main className="groups-grid">
+          <WelcomeBanner subtitle="Chargement des groupes…" />
           <div className="loading-state">Chargement des données groupes...</div>
         </main>
       </div>
@@ -211,6 +217,7 @@ function GroupsPage({ onNavigate }) {
       <Topbar activeView="groups" onNavigate={onNavigate} />
 
       <main className="groups-grid">
+        <WelcomeBanner subtitle="Comparez les groupes électrogènes : heures, conso et autonomies." />
         <div className="groups-filter-bar">
           <div className="filter-field">
             <label htmlFor="rapport_debut">Rapport début</label>
@@ -292,19 +299,25 @@ function GroupsPage({ onNavigate }) {
                       <th>Site</th>
                       <th>Heures moy.</th>
                       <th>Conso moy. (L)</th>
-                      <th>Autonomie</th>
+                      <th>Autonomie restante</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(groupsData.group_blocks || []).map((g) => {
                       const siteName = g.site_nom || g.nom_site || g.site_name || (groupsData.sites || []).find((s) => String(s.id) === String(g.site_id))?.nom_site || ''
+                      const severity = getAutonomySeverity(g)
                       return (
-                        <tr key={g.id}>
+                        <tr key={g.id} className={`autonomy-row autonomy-row--${severity}`}>
                           <td>{g.label}</td>
                           <td>{siteName}</td>
                           <td>{g.hours?.mean?.toFixed(1) ?? '—'}</td>
                           <td>{g.consumption_stats?.mean?.toFixed(1) ?? '—'}</td>
-                          <td>{g.is_infinite_consumption ? '0h' : (g.is_infinite_autonomy || g.formatted_autonomy === '∞' ? '∞' : (g.formatted_autonomy ? g.formatted_autonomy : (g.autonomie_hours != null ? formatAutonomy(g.autonomie_hours) : '—')))}</td>
+                          <td>
+                            <div className={`autonomy-cell autonomy-cell--${severity}`}>
+                              <span className="autonomy-cell-value">{formatAutonomyValue(g)}</span>
+                              <span className="autonomy-cell-label">{getAutonomySeverityLabel(severity)}</span>
+                            </div>
+                          </td>
                         </tr>
                       )
                     })}
@@ -318,29 +331,26 @@ function GroupsPage({ onNavigate }) {
               if (queryGroupLabel) return String(group.label) === String(queryGroupLabel)
               return true
             }).map((group) => (
-            <article key={group.id} className="group-card" style={{ position: 'relative', borderLeft: `4px solid ${group.color || '#0b3d7a'}` }}>
-              {/* Autonomie badge with colour coding */}
-              <div style={{
-                position: 'absolute',
-                top: '1rem',
-                right: '1rem',
-                backgroundColor: (() => {
-                  if (group.is_infinite_consumption) return '#ef4444'; // red for 0h / critical alert
-                  if (group.is_infinite_autonomy || group.formatted_autonomy === '∞') return '#6b7280'; // gray for ∞
-                  const hrs = group.autonomie_hours ?? 0;
-                  if (hrs >= 72) return '#10b981'; // green ≥3 jours
-                  if (hrs >= 36) return '#fbbf24'; // yellow ≥1.5 jours
-                  return '#ef4444'; // red <36h
-                })(),
-                color: '#fff',
-                padding: '0.6rem 0.9rem',
-                borderRadius: '999px',
-                fontWeight: 700,
-                boxShadow: '0 12px 20px rgba(0,0,0,0.08)',
-                zIndex: 1,
-              }}>
-                {group.is_infinite_consumption ? '0h' : (group.is_infinite_autonomy || group.formatted_autonomy === '∞' ? '∞' : (group.formatted_autonomy ? group.formatted_autonomy : (group.autonomie_hours != null ? formatAutonomy(group.autonomie_hours) : '—')))}
-              </div>
+            <article key={group.id} className="group-card" style={{ borderLeft: `4px solid ${group.color || '#0b3d7a'}` }}>
+              {(() => {
+                const severity = getAutonomySeverity(group)
+                return (
+                  <div className={`group-autonomy-hero group-autonomy-hero--${severity}`}>
+                    <div className="group-autonomy-hero-copy">
+                      <span className="group-autonomy-hero-kicker">Autonomie restante</span>
+                      <p className="group-autonomy-hero-hint">
+                        Information prioritaire : temps estimé avant rupture de stock pour ce groupe.
+                      </p>
+                    </div>
+                    <div className="group-autonomy-hero-value-wrap">
+                      <span className="group-autonomy-hero-value">{formatAutonomyValue(group)}</span>
+                      <span className={`group-autonomy-hero-badge group-autonomy-hero-badge--${severity}`}>
+                        {getAutonomySeverityLabel(severity)}
+                      </span>
+                    </div>
+                  </div>
+                )
+              })()}
               <div className="group-card-head">
                 <span className="metric-label">Groupe</span>
                 <h3>{group.label}</h3>

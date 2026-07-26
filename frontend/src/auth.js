@@ -194,3 +194,27 @@ export async function listMesRapports() {
 export async function normeMeta() {
   return apiFetch('/api/v1/rapports/norme')
 }
+
+export async function getRapport(rapportId) {
+  return apiFetch(`/api/v1/rapports/${rapportId}`)
+}
+
+export async function updateRapport(rapportId, payload) {
+  return apiFetch(`/api/v1/rapports/${rapportId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function listLignesRapport(rapportId) {
+  const data = await apiFetch('/api/v1/lignes_rapport')
+  const list = Array.isArray(data) ? data : (data?.results || [])
+  return list.filter((ligne) => String(ligne.rapport) === String(rapportId))
+}
+
+export async function updateLigneRapport(ligneId, payload) {
+  return apiFetch(`/api/v1/lignes_rapport/${ligneId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}

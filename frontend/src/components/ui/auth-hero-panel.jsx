@@ -1,5 +1,6 @@
 import React from 'react'
 import { cn } from '@/lib/utils'
+import logo from '../../../../logo/logo_clair_navbar.svg'
 
 /**
  * Panneau illustration + phrases fortes pour login / register.
@@ -40,8 +41,9 @@ export function AuthHeroPanel({
       </div>
 
       <div className="absolute inset-4 z-10 flex flex-col justify-between p-8 lg:p-10">
-        <div>
-          <p className="animate-element animate-delay-400 font-display text-sm font-semibold uppercase tracking-[0.2em] text-white/80">
+        <div className="animate-element animate-delay-400 flex items-center gap-3">
+          <img src={logo} alt="" className="size-11 rounded-xl object-cover shadow-lg" />
+          <p className="font-display text-sm font-semibold uppercase tracking-[0.2em] text-white/80">
             {brand}
           </p>
         </div>

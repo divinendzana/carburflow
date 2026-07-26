@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
-import { authFetch } from '../auth.js'
+import WelcomeBanner from '../components/WelcomeBanner.jsx'
+import { apiFetch } from '../auth.js'
 
 const renderDelta = (metric, suffix = '') => {
   if (metric?.has_previous_period === false) {
@@ -27,20 +28,43 @@ function CuvesPage({ onNavigate }) {
   const [cuvesData, setCuvesData] = useState(null)
   const [rapportDebut, setRapportDebut] = useState('')
   const [rapportFin, setRapportFin] = useState('')
-  const [siteId, setSiteId] = useState(null)
+  const [siteId, setSiteId] = useState('')
+  const [loadError, setLoadError] = useState('')
 
   const reportChoices = useMemo(() => (cuvesData?.rapport_choices || []), [cuvesData])
+  const rapportDebutIndex = useMemo(() => {
+    if (!reportChoices.length) return 0
+    const selectedIndex = reportChoices.findIndex((choice) => String(choice.id) === String(rapportDebut))
+    return selectedIndex >= 0 ? selectedIndex : 0
+  }, [rapportDebut, reportChoices])
+  const rapportFinIndex = useMemo(() => {
+    if (!reportChoices.length) return 0
+    const selectedIndex = reportChoices.findIndex((choice) => String(choice.id) === String(rapportFin))
+    return selectedIndex >= 0 ? selectedIndex : reportChoices.length - 1
+  }, [rapportFin, reportChoices])
+  const startIndex = Math.min(rapportDebutIndex, rapportFinIndex)
+  const endIndex = Math.max(rapportDebutIndex, rapportFinIndex)
 
   const loadCuvesData = async (queryParams = '') => {
     try {
-      const response = await authFetch(`/api/v1/dashboard/cuves${queryParams ? `?${queryParams}` : ''}`)
-      const data = await response.json()
+      setLoadError('')
+      const data = await apiFetch(`/api/v1/dashboard/cuves${queryParams ? `?${queryParams}` : ''}`)
       setCuvesData(data)
-      setRapportDebut(data.selected_rapport_debut ?? '')
-      setRapportFin(data.selected_rapport_fin ?? '')
+      setRapportDebut(
+        data.selected_rapport_debut != null
+          ? String(data.selected_rapport_debut)
+          : String(data.rapport_choices?.[0]?.id ?? ''),
+      )
+      setRapportFin(
+        data.selected_rapport_fin != null
+          ? String(data.selected_rapport_fin)
+          : String(data.rapport_choices?.[data.rapport_choices.length - 1]?.id ?? ''),
+      )
       setSiteId(data.selected_site_id != null ? String(data.selected_site_id) : '')
     } catch (error) {
-      console.warn('Cuves backend unavailable, using demo fallback data.', error)
+      console.warn('Cuves backend unavailable.', error)
+      setLoadError(error.message || 'Impossible de charger les cuves.')
+      setCuvesData(null)
     }
   }
 
@@ -54,24 +78,43 @@ function CuvesPage({ onNavigate }) {
     }
 
     const charts = []
-    const labels = (cuvesData.labels || []).slice(Math.min(Number(rapportDebut) || 0, Number(rapportFin) || 0), Math.max(Number(rapportDebut) || 0, Number(rapportFin) || 0) + 1)
+    const labels = (cuvesData.labels || []).slice(startIndex, endIndex + 1)
     const baseOptions = (unit = 'L') => ({
       responsive: true,
       maintainAspectRatio: false,
       plugins: { legend: { display: false } },
       scales: {
         x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
-        y: { beginAtZero: true, ticks: { color: chartPalette.text, callback: (value) => `${value.toLocaleString('fr-FR')} ${unit}` }, grid: { color: chartPalette.grid } },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            color: chartPalette.text,
+            callback: (value) => `${value.toLocaleString('fr-FR')} ${unit}`,
+          },
+          grid: { color: chartPalette.grid },
+        },
       },
     })
 
-    const sliceSeries = (values = []) => values.slice(Math.min(Number(rapportDebut) || 0, Number(rapportFin) || 0), Math.max(Number(rapportDebut) || 0, Number(rapportFin) || 0) + 1)
+    const sliceSeries = (values = []) => values.slice(startIndex, endIndex + 1)
     const makeChart = (id, block, unit = 'L') => {
       const target = document.getElementById(id)
       if (!target) return
-      const chart = new Chart(target, {
+      const chart = new window.Chart(target, {
         type: 'line',
-        data: { labels, datasets: [{ label: block.label, data: sliceSeries(block.values || []), borderColor: block.color || '#0b3d7a', backgroundColor: `${block.color || '#0b3d7a'}20`, borderWidth: 2, tension: 0.35, fill: true, pointRadius: 4 }] },
+        data: {
+          labels,
+          datasets: [{
+            label: block.label,
+            data: sliceSeries(block.values || []),
+            borderColor: block.color || '#0b3d7a',
+            backgroundColor: `${block.color || '#0b3d7a'}20`,
+            borderWidth: 2,
+            tension: 0.35,
+            fill: true,
+            pointRadius: 4,
+          }],
+        },
         options: baseOptions(unit),
       })
       charts.push(chart)
@@ -81,20 +124,21 @@ function CuvesPage({ onNavigate }) {
     ;(cuvesData.journalier_blocks || []).forEach((block) => makeChart(`chart-cuve-journaliere-${block.id}`, block, 'L'))
 
     return () => charts.forEach((chart) => chart.destroy())
-  }, [chartPalette, cuvesData, rapportDebut, rapportFin])
+  }, [chartPalette, cuvesData, startIndex, endIndex])
 
   if (!cuvesData) {
     return (
       <div className="app-shell dashboard-shell">
         <Topbar activeView="cuves" onNavigate={onNavigate} />
         <main className="groups-grid">
-          <div className="loading-state">Chargement des données cuves...</div>
+          <WelcomeBanner subtitle="Chargement des cuves…" />
+          <div className="loading-state">
+            {loadError || 'Chargement des données cuves...'}
+          </div>
         </main>
       </div>
     )
   }
-
-  const selectedSite = cuvesData?.sites?.find((site) => String(site.id) === String(siteId)) ?? cuvesData?.sites?.[0]
 
   const applyFilters = async (event) => {
     event.preventDefault()
@@ -110,6 +154,7 @@ function CuvesPage({ onNavigate }) {
       <Topbar activeView="cuves" onNavigate={onNavigate} />
 
       <main className="groups-grid">
+        <WelcomeBanner subtitle="Suivez les niveaux de vos cuves principales et journalières." />
         <form className="groups-filter-bar" onSubmit={applyFilters}>
           <div className="filter-field">
             <label htmlFor="cuves-debut">Rapport début</label>
