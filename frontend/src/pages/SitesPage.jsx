@@ -7,6 +7,7 @@ import PageLoader from '../components/PageLoader.jsx'
 import PageEnter from '../components/PageEnter.jsx'
 import { useChartPalette } from '../hooks/useChartPalette.js'
 import { formatAutonomyValue, getAutonomySeverity } from '../utils/format.js'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
 function SitesPage({ onNavigate }) {
   const chartPalette = useChartPalette()
@@ -223,6 +224,17 @@ function SitesPage({ onNavigate }) {
     return matchingEntry ? aggregateHoursSeries([matchingEntry]) : []
   }, [selectedSite, sitesDashboard, siteId, mode])
 
+  const chartData = useMemo(() => {
+    if (!sitesDashboard?.labels) return [];
+    const labels = (sitesDashboard.labels || []).slice(startIdx, endIdx + 1);
+    return labels.map((label, index) => ({
+      name: label,
+      volume: siteVolumeData[startIdx + index],
+      heures: siteHoursData[startIdx + index],
+      consommation: siteConsumptionData[startIdx + index],
+    }));
+  }, [sitesDashboard, siteVolumeData, siteHoursData, siteConsumptionData, startIdx, endIdx]);
+
   const siteVolumeStats = windowStats(siteVolumeData, startIdx, endIdx)
   const siteConsumptionStats = windowStats(siteConsumptionData, startIdx, endIdx, { ignoreZeros: true })
   const siteHoursStats = windowStats(siteHoursData, startIdx, endIdx, { ignoreZeros: true })
@@ -255,87 +267,7 @@ function SitesPage({ onNavigate }) {
     })
   }, [sitesDashboard, startIdx, endIdx, siteId])
 
-  useEffect(() => {
-    if (!window.Chart || !sitesDashboard || mode === 'all') return undefined
-    const charts = []
-    const labels = (sitesDashboard.labels || []).slice(startIdx, endIdx + 1)
-    const createLineChart = (id, data, color, fill = false, unit = '') => {
-      const target = document.getElementById(id)
-      if (!target) return
-      const ctx = target.getContext('2d')
-      const gradient = ctx.createLinearGradient(0, 0, 0, target.clientHeight * 1.5)
-      const baseColor = color || '#0b3d7a'
-      gradient.addColorStop(0, `${baseColor}50`)
-      gradient.addColorStop(0.6, `${baseColor}10`)
-      gradient.addColorStop(1, `${baseColor}00`)
 
-      const chart = new Chart(ctx, {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [{
-            label: id,
-            data: sliceSeries(data),
-            borderColor: baseColor,
-            backgroundColor: fill ? gradient : 'transparent',
-            borderWidth: 3,
-            tension: 0.3,
-            fill,
-            pointRadius: 0,
-            pointBackgroundColor: baseColor,
-            pointHoverRadius: 6,
-            pointHoverBorderWidth: 2,
-            pointHoverBackgroundColor: '#fff',
-          }],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { display: false },
-            tooltip: {
-              enabled: true,
-              mode: 'index',
-              intersect: false,
-              backgroundColor: chartPalette.tooltipBg,
-              titleColor: chartPalette.tooltipTitle,
-              bodyColor: chartPalette.tooltipBody,
-              borderColor: chartPalette.tooltipBorder,
-              borderWidth: 1,
-              padding: 10,
-              callbacks: {
-                title: (context) => `Le ${context[0].label}`,
-                label: (context) => {
-                  const value = context.parsed.y
-                  return `${context.dataset.label}: ${value.toLocaleString('fr-FR')} ${unit}`
-                },
-              },
-            },
-          },
-          scales: {
-            x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
-            y: {
-              ticks: {
-                color: chartPalette.text,
-                callback: (value) => `${value.toLocaleString('fr-FR')} ${unit}`,
-              },
-              grid: { color: chartPalette.grid },
-            },
-          },
-          interaction: {
-            mode: 'index',
-            intersect: false,
-          },
-        },
-      })
-      charts.push(chart)
-    }
-
-    createLineChart('chart-site-volume', siteVolumeData, '#0b3d7a', true, 'L')
-    createLineChart('chart-site-hours', siteHoursData, '#3b82f6', true, 'h')
-    createLineChart('chart-site-consumption', siteConsumptionData, '#60a5fa', true, 'L')
-    return () => charts.forEach((chart) => chart.destroy())
-  }, [chartPalette, sitesDashboard, selectedSite, siteVolumeData, siteHoursData, siteConsumptionData, startIdx, endIdx, mode])
 
   if (!sitesDashboard) {
     return (
@@ -495,7 +427,25 @@ function SitesPage({ onNavigate }) {
                     <div><span>Total sur la période de la courbe</span><strong>{siteHoursStats.total.toFixed(1)} h</strong>{renderDelta(siteHoursStats)}</div>
                     <div><span>Delta horaire moyen</span><strong>{siteHoursStats.mean.toFixed(1)} h</strong>{renderMeanDelta(siteHoursStats)}</div>
                   </div>
-                  <div className="chart-box secondary-box"><canvas id="chart-site-hours" /></div>
+                  <div className="chart-box secondary-box">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                        <CartesianGrid stroke={chartPalette.grid} strokeDasharray="3 3" />
+                        <XAxis dataKey="name" stroke={chartPalette.text} />
+                        <YAxis stroke={chartPalette.text} unit="h" />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: chartPalette.tooltipBg,
+                            borderColor: chartPalette.tooltipBorder,
+                            color: chartPalette.tooltipBody,
+                          }}
+                          labelStyle={{ color: chartPalette.tooltipTitle }}
+                          formatter={(value) => [`${value.toLocaleString('fr-FR')} h`, 'Heures']}
+                        />
+                        <Line type="monotone" dataKey="heures" name="Heures" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 8 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 </article>
 
                 <article className="metric-panel site-metric-card">
@@ -505,7 +455,25 @@ function SitesPage({ onNavigate }) {
                     <div><span>Total sur la période de la courbe</span><strong>{siteConsumptionStats.total.toFixed(1)} L</strong>{renderDelta(siteConsumptionStats)}</div>
                     <div><span>Consommation moyenne</span><strong>{siteConsumptionStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteConsumptionStats)}</div>
                   </div>
-                  <div className="chart-box secondary-box"><canvas id="chart-site-consumption" /></div>
+                  <div className="chart-box secondary-box">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                        <CartesianGrid stroke={chartPalette.grid} strokeDasharray="3 3" />
+                        <XAxis dataKey="name" stroke={chartPalette.text} />
+                        <YAxis stroke={chartPalette.text} unit="L" />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: chartPalette.tooltipBg,
+                            borderColor: chartPalette.tooltipBorder,
+                            color: chartPalette.tooltipBody,
+                          }}
+                          labelStyle={{ color: chartPalette.tooltipTitle }}
+                          formatter={(value) => [`${value.toLocaleString('fr-FR')} L`, 'Consommation']}
+                        />
+                        <Line type="monotone" dataKey="consommation" name="Consommation" stroke="#60a5fa" strokeWidth={3} dot={false} activeDot={{ r: 8 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 </article>
 
                 <article className="metric-panel site-metric-card">
@@ -515,7 +483,25 @@ function SitesPage({ onNavigate }) {
                     <div><span>Stock semaine N (dernière valeur)</span><strong>{siteVolumeStats.latest.toFixed(1)} L</strong>{renderDelta(siteVolumeStats)}</div>
                     <div><span>Volume moyen</span><strong>{siteVolumeStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteVolumeStats)}</div>
                   </div>
-                  <div className="chart-box secondary-box"><canvas id="chart-site-volume" /></div>
+                  <div className="chart-box secondary-box">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={chartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
+                        <CartesianGrid stroke={chartPalette.grid} strokeDasharray="3 3" />
+                        <XAxis dataKey="name" stroke={chartPalette.text} />
+                        <YAxis stroke={chartPalette.text} unit="L" />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: chartPalette.tooltipBg,
+                            borderColor: chartPalette.tooltipBorder,
+                            color: chartPalette.tooltipBody,
+                          }}
+                          labelStyle={{ color: chartPalette.tooltipTitle }}
+                          formatter={(value) => [`${value.toLocaleString('fr-FR')} L`, 'Volume']}
+                        />
+                        <Line type="monotone" dataKey="volume" name="Volume" stroke="#0b3d7a" strokeWidth={3} dot={false} activeDot={{ r: 8 }} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
                 </article>
               </div>
             </section>
