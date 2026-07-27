@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from django.db import transaction
@@ -432,6 +432,11 @@ def _parse_date(value: Any, *, row: int | None = None, column: str = 'date') -> 
         return value.date()
     if isinstance(value, date):
         return value
+    # Numéro de série Excel (ex. 46237 = 03/08/2026) — évite les ambiguïtés locale jj/mm
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        serial = float(value)
+        if 20000 <= serial <= 80000:  # ~1954 → ~2119
+            return (datetime(1899, 12, 30) + timedelta(days=serial)).date()
     text = str(value).strip()
     for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
         try:

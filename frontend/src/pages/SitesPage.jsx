@@ -29,26 +29,32 @@ function SitesPage({ onNavigate }) {
   const [draftMode, setDraftMode] = useState(queryMode || (querySiteId ? 'details' : 'all'))
   const [filtering, setFiltering] = useState(false)
 
-  const safeValue = (value) => (typeof value === 'number' ? value : 0)
+  const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
   const windowStats = (values = [], start, end, options = {}) => {
     const ignoreZeros = options.ignoreZeros ?? false
-    const normalizedValues = (values || []).map((value) => safeValue(value))
-    const meaningfulValues = ignoreZeros ? normalizedValues.filter((value) => value > 0) : normalizedValues
+    // Conserve null (pas de relevé) — ne convertit pas en 0
+    const series = values || []
+    const finiteOf = (arr) => arr.filter(isFiniteNumber)
+    const meaningfulOf = (arr) => {
+      const finite = finiteOf(arr)
+      return ignoreZeros ? finite.filter((value) => value > 0) : finite
+    }
 
-    const window = normalizedValues.slice(start, end + 1)
-    const meaningfulWindow = ignoreZeros ? window.filter((value) => value > 0) : window
+    const window = series.slice(start, end + 1)
+    const meaningfulWindow = meaningfulOf(window)
     const total = meaningfulWindow.reduce((sum, value) => sum + value, 0)
     const mean = meaningfulWindow.length ? total / meaningfulWindow.length : 0
 
     const prevWindowLength = end - start + 1
     const prevStart = start - prevWindowLength
     const prevEnd = start - 1
-    const prevWindow = prevStart >= 0 ? normalizedValues.slice(prevStart, prevEnd + 1) : []
-    const meaningfulPrevWindow = ignoreZeros ? prevWindow.filter((value) => value > 0) : prevWindow
+    const prevWindow = prevStart >= 0 ? series.slice(prevStart, prevEnd + 1) : []
+    const meaningfulPrevWindow = meaningfulOf(prevWindow)
     const prevTotal = meaningfulPrevWindow.reduce((sum, value) => sum + value, 0)
     const prevMean = meaningfulPrevWindow.length ? prevTotal / meaningfulPrevWindow.length : 0
 
+    const meaningfulValues = meaningfulOf(series)
     const allTimeMean = meaningfulValues.length ? meaningfulValues.reduce((sum, value) => sum + value, 0) / meaningfulValues.length : 0
     const variance = meaningfulValues.length
       ? meaningfulValues.reduce((sum, value) => sum + (value - allTimeMean) ** 2, 0) / meaningfulValues.length
@@ -58,12 +64,18 @@ function SitesPage({ onNavigate }) {
     const variationPct = prevTotal === 0 ? null : ((total - prevTotal) / prevTotal) * 100
     const meanVariationPct = prevMean === 0 ? null : ((mean - prevMean) / prevMean) * 100
 
-    const latest = window.length ? window[window.length - 1] : 0
+    let latest = null
+    for (let i = window.length - 1; i >= 0; i -= 1) {
+      if (isFiniteNumber(window[i])) {
+        latest = window[i]
+        break
+      }
+    }
 
     return {
       total: Number(total.toFixed(1)),
       mean: Number(mean.toFixed(1)),
-      latest: Number(latest.toFixed(1)),
+      latest: latest == null ? 0 : Number(latest.toFixed(1)),
       previous_total: meaningfulPrevWindow.length ? Number(prevTotal.toFixed(1)) : null,
       previous_mean: meaningfulPrevWindow.length ? Number(prevMean.toFixed(1)) : null,
       variation_pct: variationPct === null ? null : Number(variationPct.toFixed(1)),
@@ -180,7 +192,16 @@ function SitesPage({ onNavigate }) {
     if (!series.length) return []
     const maxLength = Math.max(...series.map((entry) => (entry?.data || []).length))
     return Array.from({ length: maxLength }, (_, index) => {
-      return series.reduce((sum, entry) => sum + Number(entry?.data?.[index] ?? 0), 0)
+      let hasValue = false
+      const sum = series.reduce((acc, entry) => {
+        const raw = entry?.data?.[index]
+        if (typeof raw === 'number' && Number.isFinite(raw)) {
+          hasValue = true
+          return acc + raw
+        }
+        return acc
+      }, 0)
+      return hasValue ? sum : null
     })
   }
 
@@ -193,12 +214,19 @@ function SitesPage({ onNavigate }) {
       })
     })
     return Array.from({ length: maxLength }, (_, i) => {
-      return entries.reduce((sum, entry) => {
+      let hasValue = false
+      const sum = entries.reduce((acc, entry) => {
         const entrySum = (entry?.datasets || []).reduce((dSum, dataset) => {
-          return dSum + Number(dataset?.data?.[i] ?? 0)
+          const raw = dataset?.data?.[i]
+          if (typeof raw === 'number' && Number.isFinite(raw)) {
+            hasValue = true
+            return dSum + raw
+          }
+          return dSum
         }, 0)
-        return sum + entrySum
+        return acc + entrySum
       }, 0)
+      return hasValue ? sum : null
     })
   }
 
@@ -265,10 +293,24 @@ function SitesPage({ onNavigate }) {
       if (!ctx) return
       const chart = new Chart(ctx, {
         type: 'line',
-        data: { labels, datasets: [{ label: id, data: sliceSeries(data), borderColor: color, backgroundColor: fill ? `${color}22` : 'transparent', borderWidth: 3, tension: 0.35, fill, pointRadius: 4 }] },
+        data: {
+          labels,
+          datasets: [{
+            label: id,
+            data: sliceSeries(data),
+            borderColor: color,
+            backgroundColor: fill ? `${color}22` : 'transparent',
+            borderWidth: 3,
+            tension: 0.35,
+            fill,
+            pointRadius: 4,
+            spanGaps: true,
+          }],
+        },
         options: {
           responsive: true,
           maintainAspectRatio: false,
+          spanGaps: true,
           plugins: { legend: { display: false } },
           scales: { x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } }, y: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } } },
         },

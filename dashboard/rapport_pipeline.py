@@ -307,9 +307,6 @@ def generate_rapport_template_xlsx(
         date_debut = today - timedelta(days=today.weekday())
         date_fin = date_debut + timedelta(days=6)
 
-    d1_str = date_debut.strftime('%d/%m/%Y')
-    d2_str = date_fin.strftime('%d/%m/%Y')
-
     wb = Workbook()
 
     # Feuille 1 : Entête
@@ -325,12 +322,12 @@ def generate_rapport_template_xlsx(
     ws_meta.append([])
 
     meta_rows = [
-        ('date_debut', d1_str, 'Date de début du relevé (jj/mm/aaaa)'),
-        ('date_fin', d2_str, 'Date de fin du relevé (jj/mm/aaaa)'),
+        ('date_debut', date_debut, 'Date de début du relevé (jj/mm/aaaa)'),
+        ('date_fin', date_fin, 'Date de fin du relevé (jj/mm/aaaa)'),
         ('direction_regionale', 'DOUALA', 'Direction régionale'),
         ('centre', 'CENTRE LITTORAL', 'Centre / Zone'),
         ('responsable', '', 'Nom du responsable / opérateur'),
-        ('date_generation', date_type.today().strftime('%d/%m/%Y'), 'Date de génération du fichier'),
+        ('date_generation', date_type.today(), 'Date de génération du fichier'),
     ]
 
     ws_meta.append(['Champ', 'Valeur', 'Description'])
@@ -340,6 +337,12 @@ def generate_rapport_template_xlsx(
 
     for item in meta_rows:
         ws_meta.append(list(item))
+
+    # Dates Excel natives (pas de texte jj/mm) → pas d'ambiguïté US/FR à la réouverture
+    for row_idx in (4, 5, 9):  # date_debut, date_fin, date_generation
+        cell = ws_meta.cell(row=row_idx, column=2)
+        if isinstance(cell.value, date_type):
+            cell.number_format = 'DD/MM/YYYY'
 
     ws_meta.column_dimensions['A'].width = 25
     ws_meta.column_dimensions['B'].width = 25
@@ -600,6 +603,23 @@ def analyze_rapport_rows(rows: list[dict], *, create_missing: bool = False) -> A
                     column='date_debut',
                     message='La date de début est après la date de fin.',
                     how_to_fix='Inversez ou corrigez les deux dates.',
+                )
+            )
+        elif d1 and d2 and (d2 - d1).days > 14:
+            # Protège contre les dates Excel mal interprétées (ex. 03/08 lu comme 08/03)
+            issues.append(
+                AnalysisIssue(
+                    level='error',
+                    row=excel_row,
+                    column='date_debut',
+                    message=(
+                        f'Période trop longue ({(d2 - d1).days} jours) : '
+                        f'{d1.strftime("%d/%m/%Y")} → {d2.strftime("%d/%m/%Y")}.'
+                    ),
+                    how_to_fix=(
+                        'Un relevé hebdo fait au plus 14 jours. Vérifiez jj/mm/aaaa '
+                        '(ex. 03/08/2026 = 3 août, pas le 8 mars).'
+                    ),
                 )
             )
 

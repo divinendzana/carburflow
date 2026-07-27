@@ -13,8 +13,10 @@ import {
   METRIC_LABELS,
 } from '../utils/format.js'
 
+const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value)
+
 const buildDerivedMetric = (values = []) => {
-  const normalizedValues = (values || []).map((value) => (typeof value === 'number' ? value : 0)).filter((value) => value > 0)
+  const normalizedValues = (values || []).filter(isFiniteNumber).filter((value) => value > 0)
   if (!normalizedValues.length) {
     return {
       total: 0,
@@ -45,47 +47,62 @@ const buildDerivedMetric = (values = []) => {
   }
 }
 
-const safeNum = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : 0)
+const safeNum = (value) => (isFiniteNumber(value) ? value : 0)
+
+const lastFinite = (values = []) => {
+  for (let i = values.length - 1; i >= 0; i -= 1) {
+    if (isFiniteNumber(values[i])) return values[i]
+  }
+  return null
+}
 
 const formatMetric = (value, digits = 1) => (
-  typeof value === 'number' && Number.isFinite(value) ? value.toFixed(digits) : '—'
+  isFiniteNumber(value) ? value.toFixed(digits) : '—'
 )
 
 /** Stats sur une série (semaine N / N-1 / total / moyenne).
- * La moyenne est calculée sur les valeurs non nulles uniquement
- * (consommation réelle = somme / nb de périodes avec consommation > 0).
+ * Ignore les null (pas de relevé) — ne les transforme pas en 0.
  */
 const buildPeriodSeriesStats = (values = []) => {
-  const series = (values || []).map(safeNum)
+  const series = values || []
   if (!series.length) {
     return { weekN: null, weekN1: null, total: null, mean: null }
   }
-  const total = series.reduce((sum, value) => sum + value, 0)
-  const nonZeroCount = series.filter((v) => v > 0).length
+  const finite = series.filter(isFiniteNumber)
+  const total = finite.reduce((sum, value) => sum + value, 0)
+  const nonZeroCount = finite.filter((v) => v > 0).length
+  const weekN = lastFinite(series)
+  let weekN1 = null
+  if (series.length > 1) {
+    for (let i = series.length - 2; i >= 0; i -= 1) {
+      if (isFiniteNumber(series[i])) {
+        weekN1 = series[i]
+        break
+      }
+    }
+  }
   return {
-    weekN: series[series.length - 1],
-    weekN1: series.length > 1 ? series[series.length - 2] : null,
-    total,
-    // Moyenne sur les périodes où on a eu une consommation réelle (non nulle)
-    mean: nonZeroCount > 0 ? total / nonZeroCount : 0,
+    weekN,
+    weekN1,
+    total: finite.length ? total : null,
+    mean: nonZeroCount > 0 ? total / nonZeroCount : (finite.length ? 0 : null),
   }
 }
 
 /**
- * Consommation horaire (L/h) sur les périodes où les heures sont non nulles (> 0).
- * Retourne { mean: null, ... } si toutes les consommations horaires sont nulles
- * => l'UI affichera "-L/h" plutôt que "0.00L/h".
+ * Consommation horaire (L/h) sur les périodes où les heures sont > 0.
  */
 const buildHourlyConsumptionStats = (hours = [], consumption = []) => {
   const rates = []
   const len = Math.max(hours.length, consumption.length)
   for (let index = 0; index < len; index += 1) {
-    const hoursValue = safeNum(hours[index])
-    if (hoursValue <= 0) continue
-    rates.push(safeNum(consumption[index]) / hoursValue)
+    const hoursValue = hours[index]
+    const consumptionValue = consumption[index]
+    if (!isFiniteNumber(hoursValue) || hoursValue <= 0) continue
+    if (!isFiniteNumber(consumptionValue)) continue
+    rates.push(consumptionValue / hoursValue)
   }
   if (!rates.length) {
-    // Aucune heure non nulle -> on ne peut pas calculer de L/h, on signale null
     return { mean: null, max: null, min: null, stddev: null, noData: true }
   }
   const mean = rates.reduce((sum, value) => sum + value, 0) / rates.length
@@ -136,7 +153,7 @@ function GroupsPage({ onNavigate }) {
   const startIndex = Math.min(rapportDebutIndex, rapportFinIndex)
   const endIndex = Math.max(rapportDebutIndex, rapportFinIndex)
 
-  const safeValue = (value) => (typeof value === 'number' ? value : 0)
+  const safeValue = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null)
 
   const loadGroupsData = async (queryParams = '', options = {}) => {
     try {
@@ -201,11 +218,16 @@ function GroupsPage({ onNavigate }) {
     const baseOptions = (unit, beginZero = false) => ({
       responsive: true,
       maintainAspectRatio: false,
+      spanGaps: true,
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
-            label: (context) => ` ${context.parsed.y.toLocaleString('fr-FR')} ${unit}`,
+            label: (context) => {
+              const y = context.parsed?.y
+              if (y == null || !Number.isFinite(y)) return ' —'
+              return ` ${y.toLocaleString('fr-FR')} ${unit}`
+            },
           },
         },
       },
@@ -232,6 +254,7 @@ function GroupsPage({ onNavigate }) {
               tension: 0.35,
               fill,
               pointRadius: 4,
+              spanGaps: true,
             }],
           },
           options: baseOptions(unit, true),
@@ -244,7 +267,8 @@ function GroupsPage({ onNavigate }) {
       const hourlyValues = (block.hours_run || []).map((hours, index) => {
         const hoursValue = safeValue(hours)
         const consumptionValue = safeValue((block.consumption || [])[index])
-        return hoursValue > 0 ? Number((consumptionValue / hoursValue).toFixed(2)) : 0
+        if (hoursValue == null || consumptionValue == null || hoursValue <= 0) return null
+        return Number((consumptionValue / hoursValue).toFixed(2))
       })
       makeChart(`chart-group-${block.id}-hourly-consumption`, hourlyValues, true, 'Consommation horaire', block.color || '#0b3d7a', 'L/h')
     })

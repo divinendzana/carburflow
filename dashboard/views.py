@@ -67,8 +67,8 @@ class SitesVolumeAPIView(APIView):
     """API dédiée à la page Sites : évolution du volume total par cuve principale."""
 
     def get(self, request):
-        reports = list(Rapport.objects.order_by('date_debut', 'id'))
-        labels = [f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}" for report in reports]
+        reports = calc.ordered_rapports()
+        labels = [calc.format_rapport_label(report) for report in reports]
 
         cuves = list(CuvePrincipale.objects.order_by('id'))
         site_series = []
@@ -103,8 +103,8 @@ class SitesDureeAPIView(APIView):
     """API dédiée à la page Sites : durée de fonctionnement globale par cuve principale."""
 
     def get(self, request):
-        reports = list(Rapport.objects.order_by('date_debut', 'id'))
-        labels = [f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}" for report in reports]
+        reports = calc.ordered_rapports()
+        labels = [calc.format_rapport_label(report) for report in reports]
 
         cuves = list(CuvePrincipale.objects.order_by('id'))
         sites_data = {}
@@ -160,8 +160,8 @@ class SitesConsommationAPIView(APIView):
     """API dédiée à la page Sites : consommation par cuve principale."""
 
     def get(self, request):
-        reports = list(Rapport.objects.order_by('date_debut', 'id'))
-        labels = [f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}" for report in reports]
+        reports = calc.ordered_rapports()
+        labels = [calc.format_rapport_label(report) for report in reports]
 
         cuves = list(CuvePrincipale.objects.order_by('id'))
         site_colors = ['#0b3d7a', '#3b82f6', '#60a5fa', '#1d4ed8', '#0ea5e9']
@@ -209,7 +209,7 @@ class SitesDashboardAPIView(APIView):
     """API consolidée pour la page Sites : volume, durée et consommation - Version optimisée."""
 
     def get(self, request):
-        reports = list(Rapport.objects.order_by('date_debut', 'id'))
+        reports = calc.ordered_rapports()
         sites = list(CuvePrincipale.objects.order_by('id'))
         groups = list(GroupeElectrogene.objects.order_by('id'))
         report_ids = [r.id for r in reports]
@@ -226,7 +226,7 @@ class SitesDashboardAPIView(APIView):
             )
         )
 
-        labels = [f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}" for report in reports]
+        labels = [calc.format_rapport_label(report) for report in reports]
         site_colors = ['#0b3d7a', '#3b82f6', '#60a5fa', '#1d4ed8', '#0ea5e9']
         group_colors = ['#0b3d7a', '#3b82f6', '#60a5fa', '#1d4ed8', '#0ea5e9']
 
@@ -326,7 +326,7 @@ class SitesDashboardAPIView(APIView):
             site_datasets = []
             site_groups = group_blocks_by_site.get(site_id, [])
             for group_idx, gb in enumerate(site_groups):
-                if any(v > 0 for v in gb['hours_run']):
+                if any((v or 0) > 0 for v in gb['hours_run']):
                     site_datasets.append({
                         'label': gb['label'],
                         'data': gb['hours_run'],
@@ -384,13 +384,23 @@ class DashboardOverviewAPIView(APIView):
     ABNORMAL_VARIANCE_THRESHOLD = 15.0
 
     def _report_label(self, report):
-        return f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}"
+        return calc.format_rapport_label(report)
 
     def _mean(self, values):
-        return sum(values) / len(values) if values else 0.0
+        numeric = [float(v) for v in values if v is not None]
+        return float(statistics.fmean(numeric)) if numeric else 0.0
+
+    def _last_numeric(self, values, default=0.0):
+        for value in reversed(values or []):
+            if value is not None:
+                return round(float(value), 1)
+        return default
+
+    def _numeric_values(self, values):
+        return [float(v) for v in values if v is not None]
 
     def get(self, request):
-        reports = list(Rapport.objects.order_by('date_debut', 'id'))
+        reports = calc.ordered_rapports()
         sites = list(CuvePrincipale.objects.order_by('id'))
         groups = list(GroupeElectrogene.objects.order_by('id'))
         report_ids = [r.id for r in reports]
@@ -435,8 +445,8 @@ class DashboardOverviewAPIView(APIView):
 
             meaningful_consumption = consumption_series[1:] if len(consumption_series) > 1 else consumption_series
             avg_consumption = round(self._mean(meaningful_consumption), 1)
-            latest_consumption = round(consumption_series[-1], 1) if consumption_series else 0.0
-            latest_volume = round(volume_series[-1], 1) if volume_series else 0.0
+            latest_consumption = self._last_numeric(consumption_series)
+            latest_volume = self._last_numeric(volume_series)
 
             site_rows.append({
                 'id': site.id,
@@ -496,15 +506,16 @@ class DashboardOverviewAPIView(APIView):
             consumption_series = block['consumption']
             meaningful_consumption = consumption_series[1:] if len(consumption_series) > 1 else consumption_series
             meaningful_hours = hours_series[1:] if len(hours_series) > 1 else hours_series
+            numeric_consumption = self._numeric_values(meaningful_consumption)
 
             avg_consumption = round(self._mean(meaningful_consumption), 1)
-            latest_consumption = round(consumption_series[-1], 1) if consumption_series else 0.0
+            latest_consumption = self._last_numeric(consumption_series)
             avg_hours = round(self._mean(meaningful_hours), 1)
-            latest_hours = round(hours_series[-1], 1) if hours_series else 0.0
+            latest_hours = self._last_numeric(hours_series)
 
             variance_pct = 0.0
-            if avg_consumption > 0 and len(meaningful_consumption) > 1:
-                variance_pct = round((statistics.pstdev(meaningful_consumption) / avg_consumption) * 100, 1)
+            if avg_consumption > 0 and len(numeric_consumption) > 1:
+                variance_pct = round((statistics.pstdev(numeric_consumption) / avg_consumption) * 100, 1)
 
             is_abnormal = (
                 avg_consumption > 0
@@ -618,16 +629,22 @@ class DashboardOverviewAPIView(APIView):
         priority_order = {'urgent': 0, 'warning': 1}
         alerts.sort(key=lambda item: priority_order.get(item['priority_level'], 99))
 
-        prev_consumption = (
-            round(sum(block['consumption'][-2] for block in group_blocks if len(block['consumption']) >= 2), 1)
-            if any(len(block['consumption']) >= 2 for block in group_blocks)
-            else None
-        )
-        prev_runtime = (
-            round(sum(block['hours_run'][-2] for block in group_blocks if len(block['hours_run']) >= 2), 1)
-            if any(len(block['hours_run']) >= 2 for block in group_blocks)
-            else None
-        )
+        prev_consumption = None
+        prev_runtime = None
+        if any(len(block['consumption']) >= 2 for block in group_blocks):
+            prev_vals = [
+                block['consumption'][-2]
+                for block in group_blocks
+                if len(block['consumption']) >= 2 and block['consumption'][-2] is not None
+            ]
+            prev_consumption = round(sum(prev_vals), 1) if prev_vals else None
+        if any(len(block['hours_run']) >= 2 for block in group_blocks):
+            prev_hrs = [
+                block['hours_run'][-2]
+                for block in group_blocks
+                if len(block['hours_run']) >= 2 and block['hours_run'][-2] is not None
+            ]
+            prev_runtime = round(sum(prev_hrs), 1) if prev_hrs else None
 
         return Response({
             'reports': [{'id': r.id, 'label': self._report_label(r)} for r in reports],
@@ -656,8 +673,8 @@ class GroupesAPIView(APIView):
         return float(match.group(1)) if match else 0.0
 
     def get(self, request):
-        reports = list(Rapport.objects.order_by('date_debut', 'id'))
-        labels = [f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}" for report in reports]
+        reports = calc.ordered_rapports()
+        labels = [calc.format_rapport_label(report) for report in reports]
 
         groupes = list(GroupeElectrogene.objects.order_by('id'))
         sites = list(CuvePrincipale.objects.order_by('id'))
@@ -738,7 +755,7 @@ class GroupesAPIView(APIView):
             'group_blocks': group_blocks,
             'sites': site_choices,
             'rapport_choices': [
-                {'id': report.id, 'label': f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}"}
+                {'id': report.id, 'label': calc.format_rapport_label(report)}
                 for report in reports
             ],
             'selected_rapport_debut': reports[0].id if reports else None,
@@ -751,9 +768,9 @@ class CuvesDashboardAPIView(APIView):
     """API page Cuves — adaptée au modèle post-refonte (site = cuve principale)."""
 
     def get(self, request):
-        reports = list(Rapport.objects.order_by('date_debut', 'id'))
+        reports = calc.ordered_rapports()
         labels = [
-            f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}"
+            calc.format_rapport_label(report)
             for report in reports
         ]
         report_ids = [report.id for report in reports]
@@ -876,7 +893,7 @@ class CuvesDashboardAPIView(APIView):
             'rapport_choices': [
                 {
                     'id': report.id,
-                    'label': f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}",
+                    'label': calc.format_rapport_label(report),
                 }
                 for report in reports
             ],

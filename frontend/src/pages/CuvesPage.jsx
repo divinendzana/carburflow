@@ -100,6 +100,7 @@ function CuvesPage({ onNavigate }) {
     const baseOptions = (unit = 'L') => ({
       responsive: true,
       maintainAspectRatio: false,
+      spanGaps: true,
       plugins: { legend: { display: false } },
       scales: {
         x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
@@ -131,6 +132,7 @@ function CuvesPage({ onNavigate }) {
             tension: 0.35,
             fill: true,
             pointRadius: 4,
+            spanGaps: true,
           }],
         },
         options: baseOptions(unit),

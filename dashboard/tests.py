@@ -35,8 +35,9 @@ class WeeklyReportTemplateTestCase(TestCase):
         self.assertTrue(len(rows) >= 1)
         first_row = rows[0]
         self.assertEqual(first_row.get('id_cuve_journaliere'), self.cj.identifiant)
-        self.assertEqual(first_row.get('date_debut'), '13/07/2026')
-        self.assertEqual(first_row.get('date_fin'), '17/07/2026')
+        from dashboard.norme import _parse_date
+        self.assertEqual(_parse_date(first_row.get('date_debut')), date(2026, 7, 13))
+        self.assertEqual(_parse_date(first_row.get('date_fin')), date(2026, 7, 17))
 
     def test_analyze_generated_template(self):
         content = generate_rapport_template_xlsx('2026-07-13', '2026-07-17')
@@ -345,3 +346,143 @@ class WeeklyReportTemplateTestCase(TestCase):
         self.assertFalse(CuvePrincipale.objects.filter(identifiant='SITE ORPHELIN').exists())
         self.assertFalse(CuveJournaliere.objects.filter(identifiant='SITE ORPHELIN').exists())
         self.assertTrue(CuvePrincipale.objects.filter(identifiant='SITE AKWA').exists())
+
+
+class CalculsSeriesTestCase(TestCase):
+    """Vérifie l'ordre chronologique et les trous (null) dans les séries."""
+
+    def setUp(self):
+        self.site = CuvePrincipale.objects.create(identifiant='SITE TEST', capacite=10000.0)
+        self.groupe = GroupeElectrogene.objects.create(
+            identifiant='G99-TEST-100', marque='TEST', puissance='100'
+        )
+        self.cj = CuveJournaliere.objects.create(
+            identifiant='CJ TEST',
+            capacite=2000.0,
+            cuve_principale=self.site,
+            groupe_electrogene=self.groupe,
+        )
+        self.r1 = Rapport.objects.create(date_debut=date(2026, 6, 22), date_fin=date(2026, 6, 26))
+        self.r2 = Rapport.objects.create(date_debut=date(2026, 7, 6), date_fin=date(2026, 7, 10))
+        self.r3 = Rapport.objects.create(date_debut=date(2026, 7, 13), date_fin=date(2026, 7, 17))
+
+    def _line(self, rapport, volume_cp, volume_cj, compteur, depotage=0.0):
+        return LigneRapport.objects.create(
+            rapport=rapport,
+            cuve_principale=self.site,
+            cuve_journaliere=self.cj,
+            groupe_electrogene=self.groupe,
+            quantite_gasoil_cuve_principale=volume_cp,
+            quantite_gasoil_cuve_journaliere=volume_cj,
+            depotage=depotage,
+            compteur_horaire=compteur,
+        )
+
+    def test_site_series_skips_missing_reports_without_fake_zero(self):
+        from dashboard.utils import calculs as calc
+
+        # Seulement r2 puis r3 (pas de ligne sur r1) — volume 3220 → 1440
+        self._line(self.r2, 3000.0, 220.0, 100.0)
+        self._line(self.r3, 1200.0, 240.0, 150.0)
+
+        reports = list(Rapport.objects.order_by('date_debut', 'id'))
+        lines_by_site_report = {}
+        for line in LigneRapport.objects.all():
+            lines_by_site_report.setdefault((self.site.id, line.rapport_id), []).append(line)
+
+        volume, consumption = calc.calculer_site_series(reports, lines_by_site_report, self.site.id)
+
+        self.assertEqual(volume, [None, 3220.0, 1440.0])
+        # Premier point présent = baseline 0 ; ensuite delta 3220 - 1440 = 1780
+        self.assertEqual(consumption, [None, 0.0, 1780.0])
+
+    def test_group_series_hours_and_consumption_follow_chrono(self):
+        from dashboard.utils import calculs as calc
+
+        self._line(self.r2, 3000.0, 220.0, 100.0)
+        self._line(self.r3, 1200.0, 240.0, 150.0)
+
+        reports = list(Rapport.objects.order_by('date_debut', 'id'))
+        sites = [self.site]
+        groupes = [self.groupe]
+
+        lines_by_site_report = {}
+        lines_by_group_report = {}
+        groups_by_site_report = {}
+        for line in LigneRapport.objects.all():
+            lines_by_site_report.setdefault((self.site.id, line.rapport_id), []).append(line)
+            lines_by_group_report.setdefault((self.groupe.id, line.rapport_id), []).append(line)
+            groups_by_site_report.setdefault((self.site.id, line.rapport_id), set()).add(self.groupe.id)
+
+        site_report_state = calc.build_site_report_state(reports, sites, lines_by_site_report)
+        blocks = calc.calculer_groupes(
+            reports=reports,
+            groupes=groupes,
+            sites=sites,
+            lines_by_group_report=lines_by_group_report,
+            site_report_state=site_report_state,
+            groups_by_site_report=groups_by_site_report,
+            groupes_by_id={self.groupe.id: self.groupe},
+            group_primary_site_ids={self.groupe.id: self.site.id},
+        )
+        self.assertEqual(len(blocks), 1)
+        block = blocks[0]
+        self.assertEqual(block['volume'], [None, 3220.0, 1440.0])
+        self.assertEqual(block['consumption'], [None, 0.0, 1780.0])
+        # Premier compteur = baseline 0 h ; puis +50 h
+        self.assertEqual(block['hours_run'], [None, 0.0, 50.0])
+        self.assertAlmostEqual(block['latest_hourly_consumption'], 1780.0 / 50.0, places=2)
+
+
+class RapportDateOrderTestCase(TestCase):
+    def test_labels_are_chronological_with_year(self):
+        from dashboard.utils import calculs as calc
+
+        Rapport.objects.create(date_debut=date(2026, 7, 13), date_fin=date(2026, 7, 17))
+        Rapport.objects.create(date_debut=date(2026, 6, 22), date_fin=date(2026, 6, 26))
+        # Ancien bug Excel US : 03/08 stocké comme 08/03 — doit quand même se trier après correction
+        Rapport.objects.create(date_debut=date(2026, 8, 3), date_fin=date(2026, 8, 9))
+
+        reports = calc.ordered_rapports()
+        labels = [calc.format_rapport_label(r) for r in reports]
+        self.assertEqual(
+            labels,
+            [
+                '22/06/2026 → 26/06/2026',
+                '13/07/2026 → 17/07/2026',
+                '03/08/2026 → 09/08/2026',
+            ],
+        )
+
+    def test_template_writes_native_excel_dates(self):
+        from openpyxl import load_workbook
+        from dashboard.rapport_pipeline import generate_rapport_template_xlsx
+        from dashboard.norme import _parse_date
+
+        content = generate_rapport_template_xlsx('2026-08-03', '2026-08-09')
+        wb = load_workbook(io.BytesIO(content), data_only=True)
+        ws = wb['Entête']
+        # Ligne 4 = date_debut, ligne 5 = date_fin (après titre + vide + en-têtes)
+        self.assertEqual(_parse_date(ws.cell(row=4, column=2).value), date(2026, 8, 3))
+        self.assertEqual(_parse_date(ws.cell(row=5, column=2).value), date(2026, 8, 9))
+        self.assertEqual(ws.cell(row=4, column=2).number_format, 'DD/MM/YYYY')
+
+    def test_long_period_is_rejected(self):
+        from dashboard.rapport_pipeline import analyze_rapport_rows
+
+        analysis = analyze_rapport_rows([
+            {
+                'date_debut': '08/03/2026',
+                'date_fin': '11/08/2026',
+                'id_cuve_principale': 'SITE AKWA',
+                'id_cuve_journaliere': 'CJ AKWA 1',
+                'id_groupe': '1',
+                'quantités_cuve_principale': 1000,
+                'quantite_cuve_journaliere': 100,
+                'depotage': 0,
+                'compteur_horaire': 10,
+                'état_fonctionnement': 'F',
+            }
+        ])
+        self.assertFalse(analysis.ok)
+        self.assertTrue(any('trop longue' in (i.message or '') for i in analysis.issues))

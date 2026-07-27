@@ -96,7 +96,7 @@ class Rapport(models.Model):
     class Meta:
         verbose_name = 'Rapport'
         verbose_name_plural = 'Rapports'
-        ordering = ['date_debut', 'id']
+        ordering = ['date_debut', 'date_fin', 'id']
 
     def __str__(self):
         return f'Rapport du {self.date_debut} au {self.date_fin}'
