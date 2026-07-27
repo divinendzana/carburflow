@@ -57,9 +57,12 @@ function SitesPage({ onNavigate }) {
     const variationPct = prevTotal === 0 ? null : ((total - prevTotal) / prevTotal) * 100
     const meanVariationPct = prevMean === 0 ? null : ((mean - prevMean) / prevMean) * 100
 
+    const latest = window.length ? window[window.length - 1] : 0
+
     return {
       total: Number(total.toFixed(1)),
       mean: Number(mean.toFixed(1)),
+      latest: Number(latest.toFixed(1)),
       previous_total: meaningfulPrevWindow.length ? Number(prevTotal.toFixed(1)) : null,
       previous_mean: meaningfulPrevWindow.length ? Number(prevMean.toFixed(1)) : null,
       variation_pct: variationPct === null ? null : Number(variationPct.toFixed(1)),
@@ -373,7 +376,7 @@ function SitesPage({ onNavigate }) {
                     <th>Delta horaire moyen</th>
                     <th>Consommation (période, L)</th>
                     <th>Consommation moyenne (L)</th>
-                    <th>Stock (période, L)</th>
+                    <th>Stock semaine N (L)</th>
                     <th>Stock moyen (L)</th>
                     <th>Temps restant</th>
                   </tr>
@@ -389,7 +392,7 @@ function SitesPage({ onNavigate }) {
                         <td>{site.hours.mean.toFixed(1)}</td>
                         <td>{site.consumption.total.toFixed(1)}</td>
                         <td>{site.consumption.mean.toFixed(1)}</td>
-                        <td>{site.volume.total.toFixed(1)}</td>
+                        <td>{site.volume.latest.toFixed(1)}</td>
                         <td>{site.volume.mean.toFixed(1)}</td>
                         <td>
                           <AutonomyBadge entity={siteAut} size="sm" />
@@ -455,7 +458,7 @@ function SitesPage({ onNavigate }) {
                   <span className="metric-label">Stock</span>
                   <h3>{selectedSite ? 'Volume stock' : 'Volume stock cumulé'}</h3>
                   <div className="site-metric-stack">
-                    <div><span>Total sur la période de la courbe</span><strong>{siteVolumeStats.total.toFixed(1)} L</strong>{renderDelta(siteVolumeStats)}</div>
+                    <div><span>Stock semaine N (dernière valeur)</span><strong>{siteVolumeStats.latest.toFixed(1)} L</strong>{renderDelta(siteVolumeStats)}</div>
                     <div><span>Volume moyen</span><strong>{siteVolumeStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteVolumeStats)}</div>
                   </div>
                   <div className="chart-box secondary-box"><canvas id="chart-site-volume" /></div>

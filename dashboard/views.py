@@ -118,18 +118,23 @@ class SitesDureeAPIView(APIView):
                 previous_counter = None
                 for report in reports:
                     lines = LigneRapport.objects.filter(rapport=report, cuve_principale=cuve, groupe_electrogene=groupe)
+                    has_counter = False
                     report_counter = 0.0
                     for line in lines:
                         if line.compteur_horaire is not None:
                             report_counter = max(report_counter, float(line.compteur_horaire))
+                            has_counter = True
 
-                    if previous_counter is None:
+                    if not has_counter:
                         delta = 0.0
+                    elif previous_counter is None:
+                        delta = 0.0
+                        previous_counter = report_counter
                     else:
                         delta = max(0.0, report_counter - previous_counter)
+                        previous_counter = report_counter
 
                     values.append(round(delta, 1))
-                    previous_counter = report_counter
 
                 site_datasets.append({
                     'label': f"G#{groupe.id} ({groupe.marque} {groupe.puissance})",
@@ -613,13 +618,26 @@ class DashboardOverviewAPIView(APIView):
         priority_order = {'urgent': 0, 'warning': 1}
         alerts.sort(key=lambda item: priority_order.get(item['priority_level'], 99))
 
+        prev_consumption = (
+            round(sum(block['consumption'][-2] for block in group_blocks if len(block['consumption']) >= 2), 1)
+            if any(len(block['consumption']) >= 2 for block in group_blocks)
+            else None
+        )
+        prev_runtime = (
+            round(sum(block['hours_run'][-2] for block in group_blocks if len(block['hours_run']) >= 2), 1)
+            if any(len(block['hours_run']) >= 2 for block in group_blocks)
+            else None
+        )
+
         return Response({
             'reports': [{'id': r.id, 'label': self._report_label(r)} for r in reports],
             'summary': {
                 'critical_autonomy_sites': sum(1 for s in site_rows if _site_is_critical(s)),
                 'abnormal_consumption_groups': sum(1 for g in group_rows if g['is_abnormal']),
                 'total_consumption': round(sum(s['latest_consumption'] for s in site_rows), 1),
+                'previous_total_consumption': prev_consumption,
                 'total_runtime': round(sum(g['latest_hours'] for g in group_rows), 1),
+                'previous_total_runtime': prev_runtime,
             },
             'sites': site_rows,
             'groups': group_rows,

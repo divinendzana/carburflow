@@ -136,14 +136,24 @@ def calculer_groupes(
             if primary_site_id is not None:
                 lines = [l for l in lines if l.cuve_principale_id == primary_site_id]
 
+            has_counter = False
             report_counter = 0.0
             for line in lines:
                 if line.compteur_horaire is not None:
                     report_counter = max(report_counter, float(line.compteur_horaire))
+                    has_counter = True
 
-            hour_delta = 0.0 if previous_counter is None else max(0.0, report_counter - previous_counter)
+            if not has_counter:
+                hour_delta = 0.0
+            elif previous_counter is None:
+                # Première apparition du groupe : valeur rapport N-1 supposée égale au rapport N -> delta = 0
+                hour_delta = 0.0
+                previous_counter = report_counter
+            else:
+                hour_delta = max(0.0, report_counter - previous_counter)
+                previous_counter = report_counter
+
             hours_run.append(round(hour_delta, 1))
-            previous_counter = report_counter
 
             site_state = site_report_state.get((primary_site_id, report.id), {}) if primary_site_id is not None else {}
             site_current_volume = float(site_state.get('current_volume', 0.0) or 0.0)
