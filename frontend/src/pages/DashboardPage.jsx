@@ -34,26 +34,9 @@ function normalizeAlertSeverity(alert) {
   return SEVERITY_META.medium
 }
 
-const fallbackDashboardData = {
-  summary: {
-    critical_autonomy_sites: 1,
-    abnormal_consumption_groups: 1,
-    total_consumption: 3200,
-    total_runtime: 180,
-  },
-  sites: [
-    { id: 1, site_name: 'BUF Bepanda', label: 'BUF Bepanda', avg_consumption: 180, latest_consumption: 180, latest_volume: 340, autonomy: 1.9 },
-    { id: 2, site_name: 'BUF Bonaberi', label: 'BUF Bonaberi', avg_consumption: 150, latest_consumption: 150, latest_volume: 420, autonomy: 2.8 },
-  ],
-  groups: [
-    { id: 10, label: 'G#10 (Group A)', site_name: 'BUF Bepanda', avg_consumption: 90, latest_consumption: 96, avg_hours: 24, latest_hours: 26, variance_pct: 18, autonomy: 2.1 },
-    { id: 11, label: 'G#11 (Group B)', site_name: 'BUF Bonaberi', avg_consumption: 72, latest_consumption: 74, avg_hours: 20, latest_hours: 22, variance_pct: 10, autonomy: 3.2 },
-  ],
-  alerts: [],
-}
-
 function DashboardPage({ onNavigate }) {
   const [dashboardData, setDashboardData] = useState(null)
+  const [loadError, setLoadError] = useState('')
 
   const formatValue = (value, suffix = '') => {
     if (value == null || Number.isNaN(value)) return '—'
@@ -114,16 +97,38 @@ function DashboardPage({ onNavigate }) {
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
+        setLoadError('')
         const payload = await apiFetch('/api/v1/dashboard/overview')
         setDashboardData(payload)
       } catch (error) {
-        console.warn('Dashboard API unavailable, using fallback data.', error)
-        setDashboardData(fallbackDashboardData)
+        console.warn('Dashboard API unavailable.', error)
+        setDashboardData(null)
+        setLoadError(error.message || 'Impossible de charger le tableau de bord.')
       }
     }
 
     loadDashboardData()
   }, [])
+
+  const goSites = (site = {}) => {
+    const siteId = site.id ?? site.site_id
+    onNavigate?.({
+      view: 'sites',
+      siteId,
+      siteName: site.site_name || site.label || site.nom_site,
+      mode: site.mode || (siteId ? 'details' : 'all'),
+    })
+  }
+
+  const goGroups = (group = {}) => {
+    const groupId = group.id ?? group.group_id
+    onNavigate?.({
+      view: 'groups',
+      groupId,
+      groupLabel: group.label || group.group_label,
+      mode: group.mode || (groupId ? 'details' : 'all'),
+    })
+  }
 
   const siteRows = useMemo(() => {
     if (!dashboardData?.sites?.length) return []
@@ -220,16 +225,22 @@ function DashboardPage({ onNavigate }) {
         label: 'Sites urgents',
         title: `${criticalAutonomySites}`,
         detail: 'Moins de 24 h de temps restant',
+        hrefHint: 'Voir les sites',
+        open: () => goSites(),
       },
       {
         label: 'Anomalies groupes',
         title: `${abnormalGroups}`,
         detail: 'Écart de consommation horaire détecté',
+        hrefHint: 'Voir les groupes',
+        open: () => goGroups({ mode: 'details' }),
       },
       {
         label: 'Consommation',
         title: formatValue(totalConsumption, ' L'),
         detail: 'Sur la dernière période analysée',
+        hrefHint: 'Analyser la consommation',
+        open: () => goGroups(),
         deviation: {
           value: consumptionDeviation,
           isNegative: consumptionDeviation !== null && consumptionDeviation < 0,
@@ -240,6 +251,8 @@ function DashboardPage({ onNavigate }) {
         label: 'Delta horaire',
         title: formatValue(totalRuntime, ' h'),
         detail: 'Total du delta horaire enregistré',
+        hrefHint: 'Voir le delta horaire',
+        open: () => goGroups({ mode: 'details' }),
         deviation: {
           value: runtimeDeviation,
           isNegative: runtimeDeviation !== null && runtimeDeviation < 0,
@@ -247,7 +260,7 @@ function DashboardPage({ onNavigate }) {
         },
       },
     ]
-  }, [dashboardData, groupRows, siteRows, siteAverageConsumption])
+  }, [dashboardData, groupRows, siteRows, siteAverageConsumption, onNavigate])
 
   // 1. Sites avec autonomie — tous, triés par ordre croissant (les plus urgents en premier)
   // 0h (consommation sans heures) passe en tête, ∞ (pas de données) est exclu
@@ -479,7 +492,18 @@ function DashboardPage({ onNavigate }) {
     return (
       <div className="app-shell dashboard-shell">
         <Topbar activeView="dashboard" onNavigate={onNavigate} />
-        <PageLoader label="Préparation du tableau de bord…" />
+        {loadError ? (
+          <div className="loading-state" style={{ marginTop: 24 }}>
+            {loadError}
+            <div style={{ marginTop: 12 }}>
+              <button type="button" className="filter-submit" onClick={() => window.location.reload()}>
+                Réessayer
+              </button>
+            </div>
+          </div>
+        ) : (
+          <PageLoader label="Préparation du tableau de bord…" />
+        )}
       </div>
     )
   }
@@ -495,7 +519,12 @@ function DashboardPage({ onNavigate }) {
         />
         <div className="dashboard-summary-grid">
           {summaryCards.map((card) => (
-            <article key={card.label} className="metric-panel dashboard-summary-card">
+            <button
+              key={card.label}
+              type="button"
+              className="metric-panel dashboard-summary-card dashboard-summary-card--link"
+              onClick={card.open}
+            >
               <div className="summary-card-header">
                 <span className="metric-label">{card.label}</span>
                 {card.deviation ? (
@@ -507,7 +536,8 @@ function DashboardPage({ onNavigate }) {
               </div>
               <h3>{card.title}</h3>
               <p>{card.detail}</p>
-            </article>
+              <span className="dashboard-card-cta">{card.hrefHint} →</span>
+            </button>
           ))}
         </div>
 
@@ -518,6 +548,9 @@ function DashboardPage({ onNavigate }) {
               <span className="metric-label">Priorité stock</span>
               <h3>Sites bientôt à sec</h3>
             </div>
+            <button type="button" className="dashboard-section-link" onClick={() => goSites()}>
+              Ouvrir Sites →
+            </button>
           </div>
           <div className="dashboard-table-scroll">
             <table>
@@ -533,7 +566,19 @@ function DashboardPage({ onNavigate }) {
                   const severity = getAutonomySeverity(row)
                   const level = severity === 'critical' ? 'critical' : severity === 'medium' ? 'medium' : 'low'
                   return (
-                    <tr key={row.id} className={`autonomy-row autonomy-row--${level}`}>
+                    <tr
+                      key={row.id}
+                      className={`autonomy-row autonomy-row--${level} dashboard-row-link`}
+                      onClick={() => goSites(row)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                          event.preventDefault()
+                          goSites(row)
+                        }
+                      }}
+                      tabIndex={0}
+                      role="link"
+                    >
                       <td style={{ textAlign: 'left' }}>{row.site_name || row.label}</td>
                       <td style={{ textAlign: 'right' }}>{formatValue(row.latest_volume, ' L')}</td>
                       <td style={{ textAlign: 'center' }}>
@@ -561,6 +606,9 @@ function DashboardPage({ onNavigate }) {
               <span className="metric-label">Anomalies</span>
               <h3>Écart de consommation horaire</h3>
             </div>
+            <button type="button" className="dashboard-section-link" onClick={() => goGroups({ mode: 'details' })}>
+              Ouvrir Groupes →
+            </button>
           </div>
           <div className="dashboard-table-scroll">
             <table>
@@ -575,7 +623,19 @@ function DashboardPage({ onNavigate }) {
               </thead>
               <tbody>
                 {abnormalGroupRows.map((row) => (
-                  <tr key={row.id}>
+                  <tr
+                    key={row.id}
+                    className="dashboard-row-link"
+                    onClick={() => goGroups(row)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        goGroups(row)
+                      }
+                    }}
+                    tabIndex={0}
+                    role="link"
+                  >
                     <td style={{ textAlign: 'left' }}>{row.label}</td>
                     <td style={{ textAlign: 'left' }}>{row.site_name || '—'}</td>
                     <td style={{ textAlign: 'right' }}>
@@ -612,6 +672,9 @@ function DashboardPage({ onNavigate }) {
               <span className="metric-label">Consommation</span>
               <h3>Groupes à plus forte consommation</h3>
             </div>
+            <button type="button" className="dashboard-section-link" onClick={() => goGroups()}>
+              Ouvrir Groupes →
+            </button>
           </div>
           <div className="dashboard-table-scroll">
             <table>
@@ -626,7 +689,19 @@ function DashboardPage({ onNavigate }) {
               </thead>
               <tbody>
                 {topConsumerGroupRows.map((row) => (
-                  <tr key={row.id}>
+                  <tr
+                    key={row.id}
+                    className="dashboard-row-link"
+                    onClick={() => goGroups(row)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        goGroups(row)
+                      }
+                    }}
+                    tabIndex={0}
+                    role="link"
+                  >
                     <td style={{ textAlign: 'left' }}>{row.label}</td>
                     <td style={{ textAlign: 'left' }}>{row.site_name || '—'}</td>
                     <td style={{ textAlign: 'right' }}><strong>{formatValue(row.avg_consumption, ' L')}</strong></td>
@@ -653,6 +728,9 @@ function DashboardPage({ onNavigate }) {
               <span className="metric-label">Consommation</span>
               <h3>Sites à plus forte consommation</h3>
             </div>
+            <button type="button" className="dashboard-section-link" onClick={() => goSites()}>
+              Ouvrir Sites →
+            </button>
           </div>
           <div className="dashboard-table-scroll">
             <table>
@@ -666,7 +744,19 @@ function DashboardPage({ onNavigate }) {
               </thead>
               <tbody>
                 {topConsumerSiteRows.map((row) => (
-                  <tr key={row.id}>
+                  <tr
+                    key={row.id}
+                    className="dashboard-row-link"
+                    onClick={() => goSites(row)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        goSites(row)
+                      }
+                    }}
+                    tabIndex={0}
+                    role="link"
+                  >
                     <td style={{ textAlign: 'left' }}>{row.site_name || row.label}</td>
                     <td style={{ textAlign: 'right' }}><strong>{formatValue(row.avg_consumption, ' L')}</strong></td>
                     <td style={{ textAlign: 'right' }}>{formatValue(row.latest_consumption, ' L')}</td>
@@ -714,11 +804,27 @@ function DashboardPage({ onNavigate }) {
             {alerts.length ? alerts.map((alert) => {
               const severity = alert.severity || normalizeAlertSeverity(alert).level
               const label = alert.priority || SEVERITY_META[severity]?.label || 'Moyen'
+              const openAlert = () => {
+                if (!onNavigate) return
+                if (alert.target === 'groups') {
+                  goGroups({
+                    id: alert.group_id,
+                    label: alert.group_label,
+                  })
+                } else {
+                  goSites({
+                    id: alert.site_id,
+                    site_name: alert.site_name,
+                  })
+                }
+              }
               return (
-                <div
+                <button
                   key={alert.id}
-                  className={`alert-item alert-${severity}`}
+                  type="button"
+                  className={`alert-item alert-${severity} alert-item--link`}
                   data-severity={severity}
+                  onClick={openAlert}
                 >
                   <div className="alert-severity-bar" aria-hidden="true" />
                   <div className="alert-header">
@@ -737,19 +843,9 @@ function DashboardPage({ onNavigate }) {
                       <span className="alert-anomaly-prefix">Anomalie :</span>
                     )}
                     {renderAlertSubtitle(alert.subtitle, alert.type)}
-                    <span
-                      className="alert-more"
-                      onClick={() => {
-                        if (!onNavigate) return
-                        if (alert.target === 'groups') {
-                          onNavigate({ view: 'groups', groupId: alert.group_id, groupLabel: alert.group_label })
-                        } else {
-                          onNavigate({ view: 'sites', siteId: alert.site_id, siteName: alert.site_name })
-                        }
-                      }}
-                    >En savoir plus</span>
+                    <span className="alert-more">Ouvrir →</span>
                   </p>
-                </div>
+                </button>
               )
             }) : (
               <div className="alert-empty">Aucune alerte majeure détectée pour le moment.</div>

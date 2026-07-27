@@ -61,6 +61,7 @@ function AppRoutes() {
       const params = []
       if (options.siteId != null && options.siteId !== '') params.push(`siteId=${encodeURIComponent(options.siteId)}`)
       if (options.siteName != null && options.siteName !== '') params.push(`siteName=${encodeURIComponent(options.siteName)}`)
+      if (options.mode != null && options.mode !== '') params.push(`mode=${encodeURIComponent(options.mode)}`)
       if (params.length) nextPath += `?${params.join('&')}`
     }
     if (nextView === 'groups') {

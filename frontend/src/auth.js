@@ -47,6 +47,12 @@ export async function apiFetch(path, options = {}) {
     headers['Content-Type'] = headers['Content-Type'] || 'application/json'
   }
 
+  // Plan free ngrok : sans ce header, /api peut renvoyer la page HTML d’avertissement
+  // (ERR_NGROK_6024) au lieu du JSON → login / dashboard cassés.
+  if (typeof window !== 'undefined' && /\.ngrok(-free)?\.(app|dev|io)$/i.test(window.location.hostname)) {
+    headers['ngrok-skip-browser-warning'] = '1'
+  }
+
   const token = getStoredToken()
   if (token) {
     headers.Authorization = `Token ${token}`

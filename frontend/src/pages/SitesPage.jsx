@@ -11,6 +11,7 @@ import { formatAutonomyValue, getAutonomySeverity } from '../utils/format.js'
 function SitesPage({ onNavigate }) {
   const chartPalette = useChartPalette()
   const [sitesDashboard, setsitesDashboard] = useState(null)
+  const [loadError, setLoadError] = useState('')
   const [startIdx, setStartIdx] = useState(0)
   const [endIdx, setEndIdx] = useState(0)
   const [siteId, setSiteId] = useState('')
@@ -97,6 +98,7 @@ function SitesPage({ onNavigate }) {
   useEffect(() => {
     const loadSitesData = async () => {
       try {
+        setLoadError('')
         const data = await apiFetch('/api/v1/dashboard/sites');
         if (!data?.labels || !Array.isArray(data.labels)) {
           throw new Error('Labels non valides dans les données de l\'API site')
@@ -116,23 +118,9 @@ function SitesPage({ onNavigate }) {
           defaultSiteId: data.defaultSiteId,
         });
       } catch (error) {
-        console.warn('Site backend unavailable, using demo fallback data.', error);
-        setsitesDashboard({
-          labels: ['01/01 au 07/01', '08/01 au 14/01', '15/01 au 21/01'],
-          volumeSeries: [
-            { id: 1, nom_site: 'BUF Bepanda', data: [400, 470, 510], color: '#0b3d7a' },
-            { id: 2, nom_site: 'BUF Bonaberi', data: [320, 360, 390], color: '#3b82f6' },
-          ],
-          hoursSeries: [
-            { id: 1, nom_site: 'BUF Bepanda', datasets: [{ label: 'G#100 (Perkins 250kVA)', data: [12, 14, 16] }] },
-            { id: 2, nom_site: 'BUF Bonaberi', datasets: [{ label: 'G#200 (Cummins 150kVA)', data: [8, 9, 10] }] },
-          ],
-          consumptionSeries: [
-            { id: 1, nom_site: 'BUF Bepanda', data: [230, 250, 270], color: '#0b3d7a' },
-            { id: 2, nom_site: 'BUF Bonaberi', data: [190, 210, 215], color: '#3b82f6' },
-          ],
-          defaultSiteId: 1,
-        });
+        console.warn('Site backend unavailable.', error);
+        setsitesDashboard(null)
+        setLoadError(error.message || 'Impossible de charger les sites.')
       }
     }
 
@@ -295,7 +283,18 @@ function SitesPage({ onNavigate }) {
     return (
       <div className="app-shell dashboard-shell">
         <Topbar activeView="sites" onNavigate={onNavigate} />
-        <PageLoader label="Chargement des sites…" />
+        {loadError ? (
+          <div className="loading-state" style={{ marginTop: 24 }}>
+            {loadError}
+            <div style={{ marginTop: 12 }}>
+              <button type="button" className="filter-submit" onClick={() => window.location.reload()}>
+                Réessayer
+              </button>
+            </div>
+          </div>
+        ) : (
+          <PageLoader label="Chargement des sites…" />
+        )}
       </div>
     )
   }

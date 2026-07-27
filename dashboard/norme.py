@@ -1,43 +1,88 @@
-"""Norme de rapport CarburFlow — colonnes alignées sur le CSV métier."""
+"""Norme de rapport CarburFlow — alignée sur les fiches de suivi terrain."""
 
 from __future__ import annotations
 
 import csv
 import io
+import unicodedata
 from datetime import date, datetime
 from typing import Any
 
 from django.db import transaction
 
-from dashboard.models import (
-    CuveJournaliere,
-    CuvePrincipale,
-    GroupeElectrogene,
-    LigneRapport,
-    Rapport,
-)
+from dashboard.models import Rapport
 
-# Colonnes de la norme (Excel ↔ CSV). Compatible avec ligne_rapport + dates de période.
+# Colonnes du modèle téléchargeable = fiche de suivi + période.
+# Ordre et libellés volontairement proches de data/ligne_rapport.csv.
 NORME_COLUMNS = [
     'date_debut',
     'date_fin',
     'id_cuve_principale',
     'id_cuve_journaliere',
     'id_groupe',
-    'quantite_gasoil_cuve_principale',
-    'quantite_gasoil_cuve_journaliere',
-    'compteur_horaire',
+    'quantités_cuve_principale',
+    'quantite_cuve_journaliere',
     'depotage',
-    'etat_fonctionnement',
+    'compteur_horaire',
+    'état_fonctionnement',
     'observations',
 ]
 
+# Alias acceptés à la lecture (anciens modèles / variantes sans accents).
+COLUMN_ALIASES = {
+    'quantite_gasoil_cuve_principale': 'quantités_cuve_principale',
+    'quantites_cuve_principale': 'quantités_cuve_principale',
+    'quantite_cuve_principale': 'quantités_cuve_principale',
+    'quantite_gasoil_cuve_journaliere': 'quantite_cuve_journaliere',
+    'etat_fonctionnement': 'état_fonctionnement',
+    'etat': 'état_fonctionnement',
+}
+
+
+def _strip_accents(text: str) -> str:
+    normalized = unicodedata.normalize('NFKD', text)
+    return ''.join(ch for ch in normalized if not unicodedata.combining(ch))
+
+
+def canonicalize_header(name: str) -> str:
+    raw = str(name or '').strip().lower()
+    if not raw:
+        return ''
+    if raw in COLUMN_ALIASES:
+        return COLUMN_ALIASES[raw]
+    # Tentative sans accents
+    ascii_key = _strip_accents(raw)
+    if ascii_key in COLUMN_ALIASES:
+        return COLUMN_ALIASES[ascii_key]
+    # Match canonique sans accents (ex. etat_fonctionnement ↔ état_fonctionnement)
+    for col in NORME_COLUMNS:
+        if _strip_accents(col) == ascii_key or col == raw:
+            return col
+    return raw
+
+
+def normalize_row_keys(row: dict) -> dict:
+    """Renomme les clés d’une ligne vers les noms de colonnes de la fiche."""
+    out = {}
+    for key, value in (row or {}).items():
+        if key is None:
+            continue
+        canon = canonicalize_header(str(key))
+        if not canon:
+            continue
+        # Première occurrence gagne (évite d’écraser une valeur déjà canonique)
+        if canon not in out or (out[canon] in (None, '') and value not in (None, '')):
+            out[canon] = value
+    return out
+
+
 NORME_META = {
-    'format': 'CarburFlow Rapport v1',
+    'format': 'CarburFlow Fiche de suivi v1',
     'description': (
-        'Norme de dépôt des relevés. '
-        'Une ligne = une combinaison cuve / groupe pour la période. '
-        'Téléchargez le fichier modèle, remplacez l’exemple, puis importez.'
+        'Même tableau que les fiches de suivi terrain. '
+        'id_cuve_principale = nom du site (une cuve principale = un site). '
+        'id_cuve_journaliere = nom de la cuve journalière. '
+        'Ajoutez date_debut / date_fin (identique sur toutes les lignes), puis importez.'
     ),
     'columns': [
         {
@@ -45,64 +90,56 @@ NORME_META = {
             'label': 'Date de début',
             'type': 'date',
             'required': True,
-            'example': '2026-07-13',
-            'help': 'Début de la période du relevé (AAAA-MM-JJ). Identique sur toutes les lignes.',
+            'example': '13/07/2026',
+            'help': 'Début de la période du relevé. Identique sur toutes les lignes.',
         },
         {
             'name': 'date_fin',
             'label': 'Date de fin',
             'type': 'date',
             'required': True,
-            'example': '2026-07-17',
-            'help': 'Fin de la période du relevé (AAAA-MM-JJ). Identique sur toutes les lignes.',
+            'example': '17/07/2026',
+            'help': 'Fin de la période du relevé. Identique sur toutes les lignes.',
         },
         {
             'name': 'id_cuve_principale',
-            'label': 'ID cuve principale',
-            'type': 'int',
+            'label': 'Cuve principale (site)',
+            'type': 'string',
             'required': False,
-            'example': '6001',
-            'help': 'Identifiant numérique de la cuve principale (voir écran Sites / Cuves).',
+            'example': 'BEPANDA INTERNATIONAL',
+            'help': 'Nom du site / cuve principale, comme sur la fiche de suivi.',
         },
         {
             'name': 'id_cuve_journaliere',
-            'label': 'ID cuve journalière',
-            'type': 'int',
+            'label': 'Cuve journalière',
+            'type': 'string',
             'required': False,
-            'example': '7001',
-            'help': 'Identifiant de la cuve journalière liée, si applicable.',
+            'example': 'BEPANDA INTERNATIONAL',
+            'help': 'Nom de la cuve journalière (fiche de suivi).',
         },
         {
             'name': 'id_groupe',
-            'label': 'ID groupe électrogène',
+            'label': 'N° groupe électrogène',
             'type': 'int',
             'required': False,
-            'example': '8001',
-            'help': 'Identifiant du groupe électrogène concerné par le relevé.',
+            'example': '1',
+            'help': 'Numéro du groupe électrogène (comme sur la fiche).',
         },
         {
-            'name': 'quantite_gasoil_cuve_principale',
-            'label': 'Gasoil cuve principale (L)',
+            'name': 'quantités_cuve_principale',
+            'label': 'Quantité cuve principale (L)',
             'type': 'float',
             'required': False,
-            'example': '4500',
-            'help': 'Volume de gasoil mesuré dans la cuve principale, en litres.',
+            'example': '8448',
+            'help': 'Litres mesurés dans la cuve principale.',
         },
         {
-            'name': 'quantite_gasoil_cuve_journaliere',
-            'label': 'Gasoil cuve journalière (L)',
+            'name': 'quantite_cuve_journaliere',
+            'label': 'Quantité cuve journalière (L)',
             'type': 'float',
             'required': False,
-            'example': '300',
-            'help': 'Volume de gasoil dans la cuve journalière, en litres.',
-        },
-        {
-            'name': 'compteur_horaire',
-            'label': 'Compteur horaire',
-            'type': 'float',
-            'required': False,
-            'example': '1210',
-            'help': 'Relevé du compteur horaire du groupe (heures cumulées).',
+            'example': '1000',
+            'help': 'Litres mesurés dans la cuve journalière.',
         },
         {
             'name': 'depotage',
@@ -110,15 +147,23 @@ NORME_META = {
             'type': 'float',
             'required': False,
             'example': '0',
-            'help': 'Volume dépoté sur la période, en litres (0 si aucun).',
+            'help': 'Volume dépoté sur la période (0 si aucun).',
         },
         {
-            'name': 'etat_fonctionnement',
+            'name': 'compteur_horaire',
+            'label': 'Compteur horaire',
+            'type': 'float',
+            'required': False,
+            'example': '1864',
+            'help': 'Relevé du compteur horaire du groupe.',
+        },
+        {
+            'name': 'état_fonctionnement',
             'label': 'État de fonctionnement',
             'type': 'string',
             'required': False,
             'example': 'F',
-            'help': 'Code d’état du groupe (ex. F = fonctionnement).',
+            'help': 'Code d’état (ex. F = fonctionnement).',
         },
         {
             'name': 'observations',
@@ -133,16 +178,16 @@ NORME_META = {
 
 SAMPLE_ROWS = [
     {
-        'date_debut': '2026-07-13',
-        'date_fin': '2026-07-17',
-        'id_cuve_principale': '6001',
-        'id_cuve_journaliere': '7001',
-        'id_groupe': '8001',
-        'quantite_gasoil_cuve_principale': '8448',
-        'quantite_gasoil_cuve_journaliere': '1000',
-        'compteur_horaire': '1864',
+        'date_debut': '13/07/2026',
+        'date_fin': '17/07/2026',
+        'id_cuve_principale': 'BEPANDA INTERNATIONAL',
+        'id_cuve_journaliere': 'BEPANDA INTERNATIONAL',
+        'id_groupe': '1',
+        'quantités_cuve_principale': '8448',
+        'quantite_cuve_journaliere': '1000',
         'depotage': '0',
-        'etat_fonctionnement': 'F',
+        'compteur_horaire': '1864',
+        'état_fonctionnement': 'F',
         'observations': 'RAS',
     },
 ]
@@ -181,7 +226,7 @@ def build_xlsx_bytes(include_sample: bool = True) -> bytes:
 
 
 def rapport_to_rows(rapport: Rapport) -> list[dict]:
-    """Reconstitue les lignes au format norme pour export."""
+    """Reconstitue les lignes au format fiche de suivi pour export."""
     rows = []
     lignes = rapport.lignes.select_related(
         'cuve_principale',
@@ -192,18 +237,22 @@ def rapport_to_rows(rapport: Rapport) -> list[dict]:
         rows.append({
             'date_debut': rapport.date_debut.isoformat() if rapport.date_debut else '',
             'date_fin': rapport.date_fin.isoformat() if rapport.date_fin else '',
-            'id_cuve_principale': ligne.cuve_principale_id or '',
-            'id_cuve_journaliere': ligne.cuve_journaliere_id or '',
+            'id_cuve_principale': (
+                ligne.cuve_principale.identifiant if ligne.cuve_principale_id else ''
+            ),
+            'id_cuve_journaliere': (
+                (ligne.cuve_journaliere.identifiant or '') if ligne.cuve_journaliere_id else ''
+            ),
             'id_groupe': ligne.groupe_electrogene_id or '',
-            'quantite_gasoil_cuve_principale': ligne.quantite_gasoil_cuve_principale
+            'quantités_cuve_principale': ligne.quantite_gasoil_cuve_principale
             if ligne.quantite_gasoil_cuve_principale is not None
             else '',
-            'quantite_gasoil_cuve_journaliere': ligne.quantite_gasoil_cuve_journaliere
+            'quantite_cuve_journaliere': ligne.quantite_gasoil_cuve_journaliere
             if ligne.quantite_gasoil_cuve_journaliere is not None
             else '',
-            'compteur_horaire': ligne.compteur_horaire if ligne.compteur_horaire is not None else '',
             'depotage': ligne.depotage if ligne.depotage is not None else '',
-            'etat_fonctionnement': ligne.etat_fonctionnement or '',
+            'compteur_horaire': ligne.compteur_horaire if ligne.compteur_horaire is not None else '',
+            'état_fonctionnement': ligne.etat_fonctionnement or '',
             'observations': ligne.observations or '',
         })
     return rows
@@ -348,14 +397,21 @@ def _to_int_or_none(value: Any, *, row: int | None = None, column: str | None = 
                     row=row,
                     column=column,
                     message=f'La valeur « {value} » n’est pas un numéro valide pour « {label} ».',
-                    how_to_fix='Mettez uniquement le numéro de la cuve ou du groupe (chiffres, sans lettres).',
+                    how_to_fix='Mettez uniquement le numéro du groupe (chiffres, sans lettres).',
                 )
             ],
         ) from exc
 
 
+def _to_name_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _normalize_headers(headers: list[str]) -> list[str]:
-    return [str(h or '').strip().lower() for h in headers]
+    return [canonicalize_header(h) for h in headers]
 
 
 def _missing_required_columns(headers: list[str]) -> list[dict]:
@@ -419,7 +475,7 @@ def rows_from_csv(file_bytes: bytes) -> list[dict]:
         )
     rows = []
     for raw in reader:
-        row = {k.strip().lower(): v for k, v in raw.items() if k}
+        row = normalize_row_keys({k: v for k, v in raw.items() if k})
         if not any(str(v or '').strip() for v in row.values()):
             continue
         rows.append(row)
@@ -470,165 +526,29 @@ def rows_from_xlsx(file_bytes: bytes) -> list[dict]:
     for values in rows_iter:
         if values is None or all(v is None or str(v).strip() == '' for v in values):
             continue
-        row = {}
+        raw = {}
         for idx, key in enumerate(headers):
             if not key:
                 continue
-            row[key] = values[idx] if idx < len(values) else None
-        rows.append(row)
+            raw[key] = values[idx] if idx < len(values) else None
+        rows.append(normalize_row_keys(raw))
     return rows
 
 
 @transaction.atomic
-def import_report_rows(rows: list[dict], user) -> tuple[Rapport, int]:
-    if not rows:
-        raise ImportValidationError(
-            'Votre fichier est vide : il n’y a aucune ligne de relevé.',
-            [
-                _friendly_error(
-                    row=2,
-                    column=None,
-                    message='Le fichier ne contient que les titres, sans ligne de relevé.',
-                    how_to_fix='Ajoutez au moins une ligne sous les titres (remplacez l’exemple du modèle).',
-                )
-            ],
-        )
+def import_report_rows(rows: list[dict], user, *, create_missing: bool = False) -> tuple[Rapport, int]:
+    """
+    Import web / API : délègue au pipeline (analyse + insertion).
+    Par défaut refuse les IDs inconnus (create_missing=False).
+    """
+    from dashboard.rapport_pipeline import import_rapport_lignes
 
-    errors: list[dict] = []
-    date_debut = None
-    date_fin = None
-
-    def _safe_parse_date(value, *, row: int, column: str):
-        raw = value
-        if raw is None or str(raw).strip() == '':
-            errors.append(
-                _friendly_error(
-                    row=row,
-                    column=column,
-                    message=(
-                        'La date de début est vide.'
-                        if column == 'date_debut'
-                        else 'La date de fin est vide.'
-                    ),
-                    how_to_fix=(
-                        'Remplissez la colonne « Date de début » (ex. 13/07/2026).'
-                        if column == 'date_debut'
-                        else 'Remplissez la colonne « Date de fin » (ex. 17/07/2026).'
-                    ),
-                )
-            )
-            return None
-        try:
-            return _parse_date(raw, row=row, column=column)
-        except ImportValidationError as exc:
-            errors.extend(exc.errors)
-            return None
-
-    # Ligne Excel/CSV = index + 2 (1 = titres, données à partir de 2)
-    for idx, row in enumerate(rows):
-        excel_row = idx + 2
-        d1 = _safe_parse_date(row.get('date_debut'), row=excel_row, column='date_debut')
-        d2 = _safe_parse_date(row.get('date_fin'), row=excel_row, column='date_fin')
-        if idx == 0:
-            date_debut, date_fin = d1, d2
-        elif date_debut and date_fin and d1 and d2 and (d1 != date_debut or d2 != date_fin):
-            errors.append(
-                _friendly_error(
-                    row=excel_row,
-                    column='date_debut',
-                    message='Cette ligne n’a pas la même période que les autres.',
-                    how_to_fix=(
-                        f'Mettez partout les mêmes dates : '
-                        f'{date_debut.strftime("%d/%m/%Y")} → {date_fin.strftime("%d/%m/%Y")}.'
-                    ),
-                )
-            )
-
-        for col in (
-            'id_cuve_principale',
-            'id_cuve_journaliere',
-            'id_groupe',
-        ):
-            try:
-                _to_int_or_none(row.get(col), row=excel_row, column=col)
-            except ImportValidationError as exc:
-                errors.extend(exc.errors)
-        for col in (
-            'quantite_gasoil_cuve_principale',
-            'quantite_gasoil_cuve_journaliere',
-            'compteur_horaire',
-            'depotage',
-        ):
-            try:
-                _to_float(row.get(col), row=excel_row, column=col)
-            except ImportValidationError as exc:
-                errors.extend(exc.errors)
-
-    if errors:
-        n = len(errors)
-        raise ImportValidationError(
-            (
-                'Il y a 1 point à corriger dans votre fichier.'
-                if n == 1
-                else f'Il y a {n} points à corriger dans votre fichier.'
-            ),
-            errors[:30],
-        )
-
-    if not date_debut or not date_fin:
-        raise ImportValidationError(
-            'Les dates de période sont manquantes.',
-            [
-                _friendly_error(
-                    row=2,
-                    column='date_debut',
-                    message='Impossible de lire la période du relevé.',
-                    how_to_fix='Remplissez les colonnes Date de début et Date de fin (ex. 13/07/2026).',
-                )
-            ],
-        )
-
-    rapport = Rapport.objects.create(
-        date_debut=date_debut,
-        date_fin=date_fin,
-        created_by=user,
+    normalized = [normalize_row_keys(r) for r in rows]
+    result = import_rapport_lignes(
+        normalized,
+        user=user,
+        create_missing=create_missing,
+        require_entities=True,
     )
-
-    imported = 0
-    for idx, row in enumerate(rows):
-        excel_row = idx + 2
-        cp_id = _to_int_or_none(row.get('id_cuve_principale'), row=excel_row, column='id_cuve_principale')
-        cj_id = _to_int_or_none(row.get('id_cuve_journaliere'), row=excel_row, column='id_cuve_journaliere')
-        g_id = _to_int_or_none(row.get('id_groupe'), row=excel_row, column='id_groupe')
-
-        cuve_principale = CuvePrincipale.objects.filter(pk=cp_id).first() if cp_id else None
-        cuve_journaliere = CuveJournaliere.objects.filter(pk=cj_id).first() if cj_id else None
-        groupe = GroupeElectrogene.objects.filter(pk=g_id).first() if g_id else None
-
-        LigneRapport.objects.create(
-            rapport=rapport,
-            cuve_principale=cuve_principale,
-            cuve_journaliere=cuve_journaliere,
-            groupe_electrogene=groupe,
-            quantite_gasoil_cuve_principale=_to_float(
-                row.get('quantite_gasoil_cuve_principale'),
-                row=excel_row,
-                column='quantite_gasoil_cuve_principale',
-            ),
-            quantite_gasoil_cuve_journaliere=_to_float(
-                row.get('quantite_gasoil_cuve_journaliere'),
-                row=excel_row,
-                column='quantite_gasoil_cuve_journaliere',
-            ),
-            compteur_horaire=_to_float(
-                row.get('compteur_horaire'),
-                row=excel_row,
-                column='compteur_horaire',
-            ),
-            depotage=_to_float(row.get('depotage'), row=excel_row, column='depotage'),
-            etat_fonctionnement=str(row.get('etat_fonctionnement') or 'F').strip() or 'F',
-            observations=str(row.get('observations') or '').strip(),
-        )
-        imported += 1
-
-    return rapport, imported
+    rapport = Rapport.objects.get(pk=result.rapport_id)
+    return rapport, result.imported_lines
