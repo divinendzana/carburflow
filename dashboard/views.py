@@ -376,7 +376,16 @@ class SitesDashboardAPIView(APIView):
         })
         
 class DashboardOverviewAPIView(APIView):
-    """API dédiée au dashboard : résumé, tableaux de classement et alertes métier."""
+    """
+    Point de terminaison principal pour le tableau de bord.
+
+    Cette vue agrège des données de plusieurs modèles pour fournir une vue d'ensemble complète,
+    comprenant des indicateurs de performance clés (KPIs), des classements de sites et de groupes,
+    et des alertes métier critiques.
+
+    Elle est conçue pour être performante en minimisant les requêtes à la base de données
+    grâce à des stratégies de pré-chargement et d'indexation en mémoire.
+    """
 
     AUTONOMY_CRITICAL_THRESHOLD = 2.0
     AUTONOMY_CRITICAL_HOURS = 24.0
@@ -390,12 +399,14 @@ class DashboardOverviewAPIView(APIView):
         return sum(values) / len(values) if values else 0.0
 
     def get(self, request):
+        # --- 1. Récupération des données brutes ---
+        # Charge toutes les données nécessaires en amont pour éviter les requêtes N+1.
         reports = list(Rapport.objects.order_by('date_debut', 'id'))
         sites = list(CuvePrincipale.objects.order_by('id'))
         groups = list(GroupeElectrogene.objects.order_by('id'))
         report_ids = [r.id for r in reports]
 
-        # --- Une seule requête pour toutes les lignes ---
+        # Une seule requête pour obtenir toutes les lignes de rapport pertinentes.
         lignes_all = list(
             LigneRapport.objects.filter(rapport_id__in=report_ids)
             .select_related('cuve_journaliere')
@@ -407,7 +418,9 @@ class DashboardOverviewAPIView(APIView):
             )
         )
 
-        # Indexation des lignes par (site_id, rapport_id)
+        # --- 2. Indexation des données en mémoire ---
+        # Crée des dictionnaires pour un accès rapide aux lignes par site et par groupe.
+        # Cela transforme une recherche coûteuse en un simple lookup de dictionnaire.
         lines_by_site_report = {}
         for line in lignes_all:
             site_ids = set()
@@ -418,14 +431,13 @@ class DashboardOverviewAPIView(APIView):
             for sid in site_ids:
                 lines_by_site_report.setdefault((sid, line.rapport_id), []).append(line)
 
-        # --- Indexation identique à GroupesAPIView, pour réutiliser calc.calculer_groupes ---
-        # (group_id, rapport_id) -> lignes du groupe, tous sites confondus
         lines_by_group_report = {}
         for line in lignes_all:
             if line.groupe_electrogene_id:
                 lines_by_group_report.setdefault((line.groupe_electrogene_id, line.rapport_id), []).append(line)
 
-        # --- Sites ---
+        # --- 3. Calculs au niveau des sites ---
+        # Itère sur chaque site pour calculer ses métriques de base (volume, consommation).
         site_rows = []
         site_latest_volume_map = {}
         for site in sites:
@@ -455,8 +467,10 @@ class DashboardOverviewAPIView(APIView):
 
         site_rows.sort(key=lambda item: item['avg_consumption'], reverse=True)
 
-        # --- Groupes (avec calculs partagés) ---
-        groups_by_site = {}
+        # --- 4. Calculs au niveau des groupes (logique partagée) ---
+        # Réutilise la fonction complexe `calc.calculer_groupes` pour obtenir les
+        # métriques détaillées de chaque groupe (heures, consommation, autonomie, etc.).
+        # Ceci garantit la cohérence des calculs à travers différentes API.
         group_site_counts = {}
         for line in lignes_all:
             if line.groupe_electrogene_id and line.cuve_principale_id:
@@ -489,7 +503,7 @@ class DashboardOverviewAPIView(APIView):
             selected_site_id=None,
         )
 
-        # Conversion des group_blocks en group_rows
+        # Convertit les "blocs" de calcul en "lignes" de données pour la réponse JSON.
         group_rows = []
         for block in group_blocks:
             hours_series = block['hours_run']
@@ -536,7 +550,9 @@ class DashboardOverviewAPIView(APIView):
                 'is_abnormal': is_abnormal,
             })
 
-        # --- Autonomie de site ---
+        # --- 5. Calcul de l'autonomie par site ---
+        # L'autonomie d'un site est définie comme l'autonomie maximale de ses groupes.
+        # Un site tient tant qu'au moins un de ses groupes est opérationnel.
         groups_by_site = {}
         for g in group_rows:
             if g['site_id'] is not None:
@@ -566,7 +582,8 @@ class DashboardOverviewAPIView(APIView):
                 site['is_infinite_consumption'] = False
                 site['is_infinite_autonomy'] = True
 
-        # --- Alertes ---
+        # --- 6. Génération des alertes ---
+        # Identifie les situations critiques (autonomie faible) ou anormales (consommation inhabituelle).
         def _site_is_critical(site):
             if site['is_infinite_consumption']:
                 return True
@@ -618,6 +635,8 @@ class DashboardOverviewAPIView(APIView):
         priority_order = {'urgent': 0, 'warning': 1}
         alerts.sort(key=lambda item: priority_order.get(item['priority_level'], 99))
 
+        # --- 7. Calcul des KPIs de résumé ---
+        # Calcule les totaux et les valeurs de la période précédente pour les indicateurs principaux.
         prev_consumption = (
             round(sum(block['consumption'][-2] for block in group_blocks if len(block['consumption']) >= 2), 1)
             if any(len(block['consumption']) >= 2 for block in group_blocks)
@@ -629,6 +648,7 @@ class DashboardOverviewAPIView(APIView):
             else None
         )
 
+        # --- 8. Assemblage de la réponse finale ---
         return Response({
             'reports': [{'id': r.id, 'label': self._report_label(r)} for r in reports],
             'summary': {
@@ -646,7 +666,17 @@ class DashboardOverviewAPIView(APIView):
 
 
 class GroupesAPIView(APIView):
-    """API dédiée à la page Groupes : durée, consommation et volume dérivés des lignes de rapport."""
+    """
+    Point de terminaison pour la page "Groupes Électrogènes".
+
+    Cette vue fournit toutes les données nécessaires pour visualiser les performances
+    détaillées de chaque groupe électrogène, y compris la durée de fonctionnement,
+    la consommation de carburant et le volume de carburant restant.
+
+    Elle permet de filtrer les résultats par site et s'appuie sur une logique de calcul
+    partagée (`calc.calculer_groupes`) pour assurer la cohérence des données avec
+    les autres parties de l'application.
+    """
 
     def _extract_power_value(self, value):
         if value in (None, ''):
@@ -656,6 +686,7 @@ class GroupesAPIView(APIView):
         return float(match.group(1)) if match else 0.0
 
     def get(self, request):
+        # --- 1. Récupération des données et paramètres ---
         reports = list(Rapport.objects.order_by('date_debut', 'id'))
         labels = [f"{report.date_debut.strftime('%d/%m')} au {report.date_fin.strftime('%d/%m')}" for report in reports]
 
@@ -668,7 +699,8 @@ class GroupesAPIView(APIView):
 
         report_ids = [r.id for r in reports]
 
-        # --- Bloc unique : charger TOUTES les lignes en une seule requête (élimine le N+1) ---
+        # --- 2. Chargement optimisé de toutes les lignes ---
+        # Une seule requête pour charger toutes les lignes de rapport nécessaires.
         lignes_all = list(
             LigneRapport.objects.filter(rapport_id__in=report_ids)
             .select_related('cuve_journaliere')
@@ -680,7 +712,11 @@ class GroupesAPIView(APIView):
             )
         )
 
-        # --- Construction de group_primary_site_ids ---
+        # --- 3. Création de structures de données pour les calculs ---
+        # Indexe les données en mémoire pour un accès rapide et efficace,
+        # évitant ainsi des recherches répétées dans les boucles.
+
+        # Associe chaque groupe à son site principal (par vote majoritaire).
         group_site_map = {}
         for line in lignes_all:
             if line.groupe_electrogene_id and line.cuve_principale_id:
@@ -693,7 +729,7 @@ class GroupesAPIView(APIView):
             if group_site_map.get(groupe.id)
         }
 
-        # --- Indexation des lignes par (site_id, rapport_id) ---
+        # Indexe les lignes par (site, rapport) et (groupe, rapport).
         lines_by_site_report = {}
         for line in lignes_all:
             site_ids = set()
@@ -706,7 +742,6 @@ class GroupesAPIView(APIView):
 
         site_report_state = calc.build_site_report_state(reports, sites, lines_by_site_report)
 
-        # (site_id, rapport_id) -> ids des groupes actifs sur ce site à ce rapport
         groups_by_site_report = {}
         for line in lignes_all:
             if line.cuve_principale_id and line.groupe_electrogene_id:
@@ -715,12 +750,14 @@ class GroupesAPIView(APIView):
                 )
         groupes_by_id = {g.id: g for g in groupes}
 
-        # --- Grouper les lignes par (groupe, rapport) ---
         lines_by_group_report = {}
         for line in lignes_all:
             if line.groupe_electrogene_id:
                 lines_by_group_report.setdefault((line.groupe_electrogene_id, line.rapport_id), []).append(line)
 
+        # --- 4. Appel à la logique de calcul partagée ---
+        # Exécute la fonction de calcul principale qui retourne les données structurées
+        # pour chaque groupe, en fonction du site sélectionné.
         group_blocks = calc.calculer_groupes(
             reports=reports,
             groupes=groupes,
@@ -733,6 +770,7 @@ class GroupesAPIView(APIView):
             selected_site_id=selected_site_id,
         )
 
+        # --- 5. Assemblage de la réponse ---
         return Response({
             'labels': labels,
             'group_blocks': group_blocks,

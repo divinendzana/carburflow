@@ -196,7 +196,6 @@ function GroupsPage({ onNavigate }) {
   useEffect(() => {
     if (!window.Chart || !groupsData) return undefined
     const charts = []
-    const labels = (groupsData.labels || []).slice(startIndex, endIndex + 1)
     const sliceSeries = (values = []) => (values || []).slice(startIndex, endIndex + 1)
     const baseOptions = (unit, beginZero = false) => ({
       responsive: true,
@@ -204,8 +203,21 @@ function GroupsPage({ onNavigate }) {
       plugins: {
         legend: { display: false },
         tooltip: {
+          enabled: true,
+          mode: 'index',
+          intersect: false,
+          backgroundColor: chartPalette.tooltipBg,
+          titleColor: chartPalette.tooltipTitle,
+          bodyColor: chartPalette.tooltipBody,
+          borderColor: chartPalette.tooltipBorder,
+          borderWidth: 1,
+          padding: 10,
           callbacks: {
-            label: (context) => ` ${context.parsed.y.toLocaleString('fr-FR')} ${unit}`,
+            title: (context) => `Le ${context[0].label}`,
+            label: (context) => {
+              const value = context.parsed.y
+              return `${context.dataset.label}: ${value.toLocaleString('fr-FR')} ${unit}`
+            },
           },
         },
       },
@@ -213,12 +225,23 @@ function GroupsPage({ onNavigate }) {
         x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
         y: { beginAtZero: beginZero, ticks: { color: chartPalette.text, callback: (value) => `${value.toLocaleString('fr-FR')} ${unit}` }, grid: { color: chartPalette.grid } },
       },
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
     })
 
     groupsData.group_blocks?.forEach((block) => {
       const makeChart = (elementId, data, fill, label, color, unit = 'h') => {
         const target = document.getElementById(elementId)
         if (!target) return
+        const ctx = target.getContext('2d')
+        const gradient = ctx.createLinearGradient(0, 0, 0, target.clientHeight * 1.5)
+        const baseColor = color || '#0b3d7a'
+        gradient.addColorStop(0, `${baseColor}50`)
+        gradient.addColorStop(0.6, `${baseColor}10`)
+        gradient.addColorStop(1, `${baseColor}00`)
+
         const chart = new Chart(target, {
           type: 'line',
           data: {
@@ -226,12 +249,16 @@ function GroupsPage({ onNavigate }) {
             datasets: [{
               label,
               data: sliceSeries(data),
-              borderColor: color,
-              backgroundColor: `${color}20`,
-              borderWidth: 2,
-              tension: 0.35,
+              borderColor: baseColor,
+              backgroundColor: gradient,
+              borderWidth: 3,
+              tension: 0.3,
               fill,
-              pointRadius: 4,
+              pointRadius: 0,
+              pointBackgroundColor: baseColor,
+              pointHoverRadius: 6,
+              pointHoverBorderWidth: 2,
+              pointHoverBackgroundColor: '#fff',
             }],
           },
           options: baseOptions(unit, true),

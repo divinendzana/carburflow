@@ -259,26 +259,81 @@ function SitesPage({ onNavigate }) {
     if (!window.Chart || !sitesDashboard || mode === 'all') return undefined
     const charts = []
     const labels = (sitesDashboard.labels || []).slice(startIdx, endIdx + 1)
-    const sliceSeries = (values = []) => values.slice(startIdx, endIdx + 1)
-    const createLineChart = (id, data, color, fill = false) => {
-      const ctx = document.getElementById(id)
-      if (!ctx) return
+    const createLineChart = (id, data, color, fill = false, unit = '') => {
+      const target = document.getElementById(id)
+      if (!target) return
+      const ctx = target.getContext('2d')
+      const gradient = ctx.createLinearGradient(0, 0, 0, target.clientHeight * 1.5)
+      const baseColor = color || '#0b3d7a'
+      gradient.addColorStop(0, `${baseColor}50`)
+      gradient.addColorStop(0.6, `${baseColor}10`)
+      gradient.addColorStop(1, `${baseColor}00`)
+
       const chart = new Chart(ctx, {
         type: 'line',
-        data: { labels, datasets: [{ label: id, data: sliceSeries(data), borderColor: color, backgroundColor: fill ? `${color}22` : 'transparent', borderWidth: 3, tension: 0.35, fill, pointRadius: 4 }] },
+        data: {
+          labels,
+          datasets: [{
+            label: id,
+            data: sliceSeries(data),
+            borderColor: baseColor,
+            backgroundColor: fill ? gradient : 'transparent',
+            borderWidth: 3,
+            tension: 0.3,
+            fill,
+            pointRadius: 0,
+            pointBackgroundColor: baseColor,
+            pointHoverRadius: 6,
+            pointHoverBorderWidth: 2,
+            pointHoverBackgroundColor: '#fff',
+          }],
+        },
         options: {
           responsive: true,
           maintainAspectRatio: false,
-          plugins: { legend: { display: false } },
-          scales: { x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } }, y: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              enabled: true,
+              mode: 'index',
+              intersect: false,
+              backgroundColor: chartPalette.tooltipBg,
+              titleColor: chartPalette.tooltipTitle,
+              bodyColor: chartPalette.tooltipBody,
+              borderColor: chartPalette.tooltipBorder,
+              borderWidth: 1,
+              padding: 10,
+              callbacks: {
+                title: (context) => `Le ${context[0].label}`,
+                label: (context) => {
+                  const value = context.parsed.y
+                  return `${context.dataset.label}: ${value.toLocaleString('fr-FR')} ${unit}`
+                },
+              },
+            },
+          },
+          scales: {
+            x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
+            y: {
+              ticks: {
+                color: chartPalette.text,
+                callback: (value) => `${value.toLocaleString('fr-FR')} ${unit}`,
+              },
+              grid: { color: chartPalette.grid },
+            },
+          },
+          interaction: {
+            mode: 'index',
+            intersect: false,
+          },
         },
       })
       charts.push(chart)
     }
 
-    createLineChart('chart-site-volume', siteVolumeData, '#0b3d7a', true)
-    createLineChart('chart-site-hours', siteHoursData, '#3b82f6', true)
-    createLineChart('chart-site-consumption', siteConsumptionData, '#60a5fa', true)
+    createLineChart('chart-site-volume', siteVolumeData, '#0b3d7a', true, 'L')
+    createLineChart('chart-site-hours', siteHoursData, '#3b82f6', true, 'h')
+    createLineChart('chart-site-consumption', siteConsumptionData, '#60a5fa', true, 'L')
     return () => charts.forEach((chart) => chart.destroy())
   }, [chartPalette, sitesDashboard, selectedSite, siteVolumeData, siteHoursData, siteConsumptionData, startIdx, endIdx, mode])
 

@@ -100,7 +100,27 @@ function CuvesPage({ onNavigate }) {
     const baseOptions = (unit = 'L') => ({
       responsive: true,
       maintainAspectRatio: false,
-      plugins: { legend: { display: false } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          enabled: true,
+          mode: 'index',
+          intersect: false,
+          backgroundColor: chartPalette.tooltipBg,
+          titleColor: chartPalette.tooltipTitle,
+          bodyColor: chartPalette.tooltipBody,
+          borderColor: chartPalette.tooltipBorder,
+          borderWidth: 1,
+          padding: 10,
+          callbacks: {
+            title: (context) => `Le ${context[0].label}`,
+            label: (context) => {
+              const value = context.parsed.y
+              return `${context.dataset.label}: ${value.toLocaleString('fr-FR')} ${unit}`
+            },
+          },
+        },
+      },
       scales: {
         x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
         y: {
@@ -112,12 +132,25 @@ function CuvesPage({ onNavigate }) {
           grid: { color: chartPalette.grid },
         },
       },
+      interaction: {
+        mode: 'index',
+        intersect: false,
+      },
     })
 
     const sliceSeries = (values = []) => values.slice(startIndex, endIndex + 1)
     const makeChart = (id, block, unit = 'L') => {
       const target = document.getElementById(id)
       if (!target) return
+      const ctx = target.getContext('2d')
+
+      // Création du dégradé
+      const gradient = ctx.createLinearGradient(0, 0, 0, target.clientHeight * 1.5)
+      const baseColor = block.color || '#0b3d7a'
+      gradient.addColorStop(0, `${baseColor}50`) // Plus opaque en haut
+      gradient.addColorStop(0.6, `${baseColor}10`) // Plus transparent vers le bas
+      gradient.addColorStop(1, `${baseColor}00`)
+
       const chart = new window.Chart(target, {
         type: 'line',
         data: {
@@ -125,12 +158,16 @@ function CuvesPage({ onNavigate }) {
           datasets: [{
             label: block.label,
             data: sliceSeries(block.values || []),
-            borderColor: block.color || '#0b3d7a',
-            backgroundColor: `${block.color || '#0b3d7a'}20`,
-            borderWidth: 2,
-            tension: 0.35,
+            borderColor: baseColor,
+            backgroundColor: gradient,
+            borderWidth: 3,
+            tension: 0.3,
             fill: true,
-            pointRadius: 4,
+            pointRadius: 0,
+            pointBackgroundColor: baseColor,
+            pointHoverRadius: 6,
+            pointHoverBorderWidth: 2,
+            pointHoverBackgroundColor: '#fff',
           }],
         },
         options: baseOptions(unit),
