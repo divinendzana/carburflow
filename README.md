@@ -73,11 +73,22 @@ L'application web devrait maintenant être accessible à l'adresse `http://local
 
 ---
 
-## Scripts Utilitaires
+## Lancement rapide
 
-Le projet inclut des scripts shell pour simplifier le lancement des services :
+Pour lancer l'ensemble de l'application (backend + frontend) en une seule commande, utilisez :
 
-- `scripts/start-api.sh`: Démarre le serveur API Django sur le port 8001. Il exécute également les migrations de base de données et peuple la base de données avec des comptes de démonstration (`admin`/`admin123` et `user`/`user123`).
-- `scripts/start-frontend.sh`: Démarre le serveur de développement Vite pour l'application React sur le port 5174.
+```bash
+./scripts/start-dev.sh
+```
+Cela lancera les deux services en parallèle. L'application sera accessible sur `http://localhost:5174`.
+
+---
+
+## Scripts détaillés
+
+Si vous préférez lancer chaque service séparément :
+
+-   `scripts/start-api.sh`: Démarre le serveur API Django sur le port 8001. Il exécute également les migrations de base de données et peuple la base de données avec des comptes de démonstration (`admin`/`admin123` et `user`/`user123`).
+-   `scripts/start-frontend.sh`: Démarre le serveur de développement Vite pour l'application React sur le port 5174.
 
 Vous pouvez lancer chaque script dans un terminal séparé pour faire fonctionner l'application complète.
