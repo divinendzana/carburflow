@@ -175,6 +175,17 @@ export async function downloadNorme(format = 'xlsx') {
   await triggerBlobDownload(response, `carburflow_norme_rapport.${format}`)
 }
 
+export async function downloadFicheHebdo(dateDebut, dateFin) {
+  let url = '/api/v1/rapports/generer.xlsx'
+  const params = new URLSearchParams()
+  if (dateDebut) params.append('date_debut', dateDebut)
+  if (dateFin) params.append('date_fin', dateFin)
+  const query = params.toString()
+  if (query) url += `?${query}`
+  const response = await apiFetch(url, { raw: true })
+  await triggerBlobDownload(response, 'carburflow_fiche_hebdo.xlsx')
+}
+
 export async function downloadRapport(rapportId, format = 'xlsx') {
   const response = await apiFetch(
     `/api/v1/rapports/${rapportId}/export.${format}`,

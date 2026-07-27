@@ -70,6 +70,24 @@ class NormeXlsxAPIView(APIView):
         return response
 
 
+class GenererRapportHebdoAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(tags=['Norme'], summary='Générer la fiche de relevé hebdomadaire pré-remplie Excel')
+    def get(self, request):
+        from dashboard.rapport_pipeline import generate_rapport_template_xlsx
+        date_debut = request.query_params.get('date_debut')
+        date_fin = request.query_params.get('date_fin')
+        content = generate_rapport_template_xlsx(date_debut, date_fin)
+        filename = 'carburflow_fiche_hebdo.xlsx'
+        response = HttpResponse(
+            content,
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return response
+
+
 class RapportUploadAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -214,16 +232,28 @@ class RapportDeleteAPIView(APIView):
                 status=status.HTTP_403_FORBIDDEN,
             )
         rapport = get_object_or_404(Rapport, pk=rapport_id)
-        rapport_pk = rapport.id
-        lignes = rapport.lignes.count()
-        rapport.delete()
+        from dashboard.rapport_pipeline import delete_rapport_and_orphans
+
+        deleted = delete_rapport_and_orphans(rapport)
+        parts = [f'{deleted["lignes"]} ligne(s)']
+        if deleted['cuves_principales']:
+            parts.append(f'{len(deleted["cuves_principales"])} site(s)')
+        if deleted['cuves_journalieres']:
+            parts.append(f'{len(deleted["cuves_journalieres"])} cuve(s) journalière(s)')
+        if deleted['groupes']:
+            parts.append(f'{len(deleted["groupes"])} groupe(s)')
         return Response(
             {
                 'detail': (
-                    f'Le rapport n°{rapport_pk} a été supprimé '
-                    f'({lignes} ligne(s) associée(s) retirée(s)).'
+                    f'Le rapport n°{deleted["rapport_id"]} a été supprimé '
+                    f'({", ".join(parts)} retiré(s)).'
                 ),
-                'id': rapport_pk,
+                'id': deleted['rapport_id'],
+                'orphans_removed': {
+                    'cuves_principales': deleted['cuves_principales'],
+                    'cuves_journalieres': deleted['cuves_journalieres'],
+                    'groupes': deleted['groupes'],
+                },
             },
             status=status.HTTP_200_OK,
         )

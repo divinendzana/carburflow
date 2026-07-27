@@ -1,0 +1,38 @@
+# CARBURFLOW - RAPPORT IMPORTE
+# date_debut: 13/07/2026
+# date_fin: 17/07/2026
+# rapport_id: 3
+# colonnes: code_cuve_journaliere, site, groupe_marque, quantite_cuve_principale, quantite_cuve_journaliere, depotage, compteur_horaire, etat_fonctionnement, observations
+id_cuve_journaliere,site,id_groupe,quantite_cuve_principale,quantite_cuve_journaliere,depotage,compteur_horaire,etat_fonctionnement,observations
+BEPANDA INTERNATIONAL,BEPANDA INTERNATIONAL,G1-SDMO-830,22462.0,1000.0,15166.0,1877.0,F,Ravitaillement de 15 166 Litres de carburant de la livraison de 25 OOO Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026
+BEPANDA NATIONAL 1,BEPANDA NATIONAL,G2-SDMO-650,4520.0,1000.0,3087.0,1014.0,F,Ravitaillement de 3087 Litres de carburant de la livraison de 25 000 Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026
+BEPANDA NATIONAL 2,BEPANDA NATIONAL,G3-DEUTZ-450,4520.0,1000.0,3087.0,7162.0,F,Ravitaillement de 3087 Litres de carburant de la livraison de 25 000 Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026
+CT AKWA CENTRE,CT AKWA CENTRE,G4-AKSA-493,4032.0,588.0,2232.0,1283.0,F,Ravitaillement de 2232 Litres de carburant de la livraison de 25 OOO Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026 | .
+CT BONABERI 1,CT BONABERI,G5-LEROY SOMMER-110,2161.0,1000.0,0.0,1185.0,F,Défaut d’inclinaison de la cuve Principale impossible de jauger dans ces conditions
+CT BONABERI 2,CT BONABERI,G6-DEUTZ-185,2161.0,1000.0,0.0,8982.0,HS,Défaut d’inclinaison de la cuve Principale impossible de jauger dans ces conditions
+CT BASSA,CT BASSA,G7-AKSA-220,4251.0,1000.0,2314.0,6725.0,F,Ravitaillement de 2314 Litres de carburant de la livraison de 25 OOO Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026
+CT AKWA NORD,CT AKWA NORD,G8-DEUTZ-350,3084.0,1000.0,0.0,5336.0,F,RAS
+POP BONANJO,POP BONANJO,G9-AKSA-110,530.0,192.0,0.0,4059.0,F,RAS
+LOGBESSOU CRTV,LOGBESSOU CRTV,G10-SDMO-33,2250.0,0.0,0.0,4038.0,F,RAS
+BEPANDA PETIT MARCHE,BEPANDA PETIT MARCHE,G11-LIONROCK-18,1000.0,0.0,0.0,1954.0,F,; Jauge sale ; Pupitre de lecture floue
+PK 21,PK 21,G12-LIONROCK-18,320.0,0.0,0.0,1644.0,P,EN ARRET
+LAQUINTINI,LAQUINTINI,G13-LIONROCK-18,320.0,0.0,0.0,1974.0,F,RAS
+LYCEE PALMIER,LYCEE PALMIER,G14-HUAWEI-23,530.0,0.0,0.0,19.0,F,RAS
+CAMP DES OFFICIERS,CAMP DES OFFICIERS,G15-LIONROCK-18,650.0,0.0,0.0,1164.0,P,Batterie HS ; Pas de chargeur batterie ;
+MALANGUE,MALANGUE,G16-HUAWEI-23,750.0,0.0,0.0,73.0,F,GES en défaut (en arrêt pour le moment
+YASSA VILLAGE,YASSA VILLAGE,G17-LIONROCK-18,600.0,0.0,0.0,1626.0,F,RAS
+NEWBEL MAGASIN,NEWBEL MAGASIN,G18-ONIS VISA-22,500.0,0.0,0.0,896.0,F,RAS
+NDOCKPASSI,NDOCKPASSI,G19-SDMO-22,710.0,0.0,0.0,0.0,P,Compteur horaire Illisible sur le contrôleur du GES
+BONALOKA,BONALOKA,G20-LIONROCK-18,900.0,0.0,0.0,663.0,F,"PAS D’INVERSSEUR de Sources, GES A L’ARRET"
+LOGPOM SODICOMBO,LOGPOM SODICOMBO,G21-LIONROCK-18,970.0,0.0,0.0,2139.0,P,RAS
+BONAMOUSSADI VILLAGE,BONAMOUSSADI VILLAGE,G22-LIONROCK-18,730.0,1000.0,0.0,1706.0,F,RAS
+JAPOMA STADE,JAPOMA STADE,G23-PERKINS-60,2450.0,0.0,0.0,5301.0,F,RAS
+E.P. NEWBELL BAMILEKE,E.P. NEWBELL BAMILEKE,G24-HUAWEI-23,800.0,0.0,0.0,801.0,F,GES En arrêt défaut de l’électrovanne d’arrêt
+NDOGBONG SCAMTROPIC,NDOGBONG SCAMTROPIC,G25-LISTER PETTER-12.5,0.0,0.0,0.0,0.0,HS,GE lister Peter Vétuste en arrêt
+MABANDA,MABANDA,G26-LISTER PETTER-12.5,0.0,0.0,0.0,0.0,HS,GE lister Peter Vétuste en arrêt
+BEPANDA LYCEE,BEPANDA LYCEE,G28-HUAWEI-23,800.0,0.0,0.0,1231.0,F,RAS
+BONENDALE,BONENDALE,G29-LIONROCK-18,600.0,0.0,0.0,4211.0,P,Cuve journalière: XXX L
+AC AKWA NORD,AC AKWA NORD,G30-LIONROCK-27,154.0,0.0,0.0,745.0,F,RAS
+DATA CENTER 1,DATA CENTER,G31-CUMMINS-500,3270.0,0.0,3000.0,357.0,F,RAS Ravitaillement de 3000 Litres de carburant de la livraison de 25 OOO Litres fournit par le Marqueteur NEPTUNE OUIL en date du 15/07/2026
+DATA CENTER 2,DATA CENTER,G32-CUMMINS-500,3270.0,0.0,0.0,0.0,HS,GES Hors service (défaut carte de contrôle)
+BTS MBOPI GENDARMERIE,BTS MBOPI GENDARMERIE,G33-KHOLERR-0,0.0,0.0,0.0,601.0,NC,état non renseigné (²) ; Cuve principale: Aucun baremage sur la cuve

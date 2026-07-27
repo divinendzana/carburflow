@@ -53,16 +53,16 @@ class CuvePrincipaleAdmin(admin.ModelAdmin):
 
 @admin.register(GroupeElectrogene)
 class GroupeElectrogeneAdmin(admin.ModelAdmin):
-    list_display = ('identifiant', 'marque', 'puissance', 'compteur_horaire')
+    list_display = ('identifiant', 'marque', 'puissance')
     search_fields = ('identifiant', 'marque', 'puissance')
     ordering = ('identifiant',)
 
 
 @admin.register(CuveJournaliere)
 class CuveJournaliereAdmin(admin.ModelAdmin):
-    list_display = ('id', 'capacite', 'cuve_principale', 'groupe_electrogene')
+    list_display = ('id', 'identifiant', 'capacite', 'cuve_principale', 'groupe_electrogene')
     list_filter = ('cuve_principale',)
-    search_fields = ('groupe_electrogene__identifiant', 'cuve_principale__identifiant')
+    search_fields = ('identifiant', 'groupe_electrogene__identifiant', 'cuve_principale__identifiant')
 
 
 # ─── Rapports ────────────────────────────────────────────────────────────────
