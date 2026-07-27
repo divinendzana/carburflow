@@ -105,7 +105,14 @@ class RapportUploadAPIView(APIView):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-            rapport, imported = import_report_rows(rows, request.user)
+            # Admin : peut créer à la volée les sites/groupes inconnus détectés.
+            # Opérateur : doit utiliser des IDs déjà connus (ou passer par les scripts CLI).
+            create_missing = user_is_admin(request.user)
+            rapport, imported = import_report_rows(
+                rows,
+                request.user,
+                create_missing=create_missing,
+            )
             return Response(
                 {
                     'detail': (

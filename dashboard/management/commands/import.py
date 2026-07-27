@@ -204,6 +204,7 @@ class Command(BaseCommand):
             CuveJournaliere.objects.update_or_create(
                 id=cj_id,
                 defaults={
+                    'identifiant': name,
                     'cuve_principale_id': cp_id,
                     'capacite': self._to_float(self._get_column(row, 'capacite')),
                 },

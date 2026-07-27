@@ -59,6 +59,8 @@ class GroupeElectrogene(models.Model):
 
 
 class CuveJournaliere(models.Model):
+    # Nom terrain (fiche de suivi), ex. "BEPANDA NATIONAL 1"
+    identifiant = models.CharField(max_length=100, unique=True, null=True, blank=True)
     capacite = models.FloatField()
     cuve_principale = models.ForeignKey(
         CuvePrincipale,
@@ -74,6 +76,8 @@ class CuveJournaliere(models.Model):
     )
 
     def __str__(self):
+        if self.identifiant:
+            return f'CuveJournaliere {self.identifiant}'
         if self.groupe_electrogene:
             return f'CuveJournaliere liée à {self.groupe_electrogene.identifiant}'
         return f'CuveJournaliere {self.id}'

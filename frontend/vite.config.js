@@ -23,20 +23,13 @@ export default defineConfig(({ mode }) => {
       host: true,
       port: 5174,
       strictPort: true,
+      // Accepte les hôtes ngrok / tunnels (sinon page blanche « Blocked request »)
+      allowedHosts: true,
       fs: {
         allow: [path.resolve(__dirname, '..')],
       },
-      // Sans ça, Vite renvoie une page « host not allowed » (pas du JS)
-      // → le navigateur bloque @vite/client (MIME interdit / vide)
-      allowedHosts: [
-        '.use.devtunnels.ms',
-        '.devtunnels.ms',
-        '.trycloudflare.com',
-        '.ngrok-free.app',
-        '.ngrok-free.dev',
-        '.ngrok.app',
-        '.ngrok.io',
-      ],
+      // Obligatoire derrière ngrok HTTPS : le WS HMR doit passer en wss:443
+      // (lance avec: npm run dev:tunnel  ou  ./scripts/start-frontend.sh tunnel)
       ...(tunnel
         ? {
             hmr: {

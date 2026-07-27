@@ -19,67 +19,67 @@ const SIMPLE_COLUMNS = [
     label: 'Date de début',
     required: true,
     example: '13/07/2026',
-    help: 'Premier jour de votre période de relevé.',
+    help: 'Premier jour de votre période de relevé (identique sur toutes les lignes).',
   },
   {
     name: 'date_fin',
     label: 'Date de fin',
     required: true,
     example: '17/07/2026',
-    help: 'Dernier jour de votre période de relevé (même période sur toutes les lignes).',
+    help: 'Dernier jour de votre période de relevé (identique sur toutes les lignes).',
   },
   {
     name: 'id_cuve_principale',
-    label: 'N° cuve principale',
+    label: 'Cuve principale (site)',
     required: false,
-    example: '6001',
-    help: 'Le numéro de la grande cuve (voir l’écran Cuves).',
+    example: 'BEPANDA INTERNATIONAL',
+    help: 'Nom du site, comme sur la fiche de suivi (une cuve principale = un site).',
   },
   {
     name: 'id_cuve_journaliere',
-    label: 'N° cuve journalière',
+    label: 'Cuve journalière',
     required: false,
-    example: '7001',
-    help: 'Le numéro de la petite cuve du jour, si vous en avez une.',
+    example: 'BEPANDA INTERNATIONAL',
+    help: 'Nom de la cuve journalière, comme sur la fiche de suivi.',
   },
   {
     name: 'id_groupe',
     label: 'N° groupe électrogène',
     required: false,
-    example: '8001',
-    help: 'Le numéro du groupe concerné (voir l’écran Groupes).',
+    example: '1',
+    help: 'Numéro du groupe, comme sur la fiche de suivi.',
   },
   {
-    name: 'quantite_gasoil_cuve_principale',
-    label: 'Gasoil cuve principale (litres)',
+    name: 'quantités_cuve_principale',
+    label: 'Quantité cuve principale (L)',
     required: false,
-    example: '4500',
-    help: 'Combien de litres restent dans la grande cuve.',
+    example: '8448',
+    help: 'Litres mesurés dans la cuve principale.',
   },
   {
-    name: 'quantite_gasoil_cuve_journaliere',
-    label: 'Gasoil cuve journalière (litres)',
+    name: 'quantite_cuve_journaliere',
+    label: 'Quantité cuve journalière (L)',
     required: false,
-    example: '300',
-    help: 'Combien de litres restent dans la cuve journalière.',
-  },
-  {
-    name: 'compteur_horaire',
-    label: 'Compteur horaire',
-    required: false,
-    example: '1210',
-    help: 'Le chiffre lu sur le compteur du groupe.',
+    example: '1000',
+    help: 'Litres mesurés dans la cuve journalière.',
   },
   {
     name: 'depotage',
-    label: 'Dépotage (litres)',
+    label: 'Dépotage (L)',
     required: false,
     example: '0',
     help: 'Litres ajoutés pendant la période. Mettez 0 s’il n’y en a pas.',
   },
   {
-    name: 'etat_fonctionnement',
-    label: 'État',
+    name: 'compteur_horaire',
+    label: 'Compteur horaire',
+    required: false,
+    example: '1864',
+    help: 'Le chiffre lu sur le compteur du groupe.',
+  },
+  {
+    name: 'état_fonctionnement',
+    label: 'État de fonctionnement',
     required: false,
     example: 'F',
     help: 'En général : F (fonctionne).',
@@ -582,6 +582,81 @@ function ReportsPage({ onNavigate }) {
                 ? 'Aucun résultat pour cette recherche.'
                 : 'Aucun rapport pour l’instant. Commencez par l’étape 1 ci-dessus.'}
             </p>
+          ) : isAdmin ? (
+            <div className="reports-table-wrap">
+              <table className="reports-table">
+                <thead>
+                  <tr>
+                    <th>Rapport</th>
+                    <th>Période</th>
+                    <th>Lignes</th>
+                    <th>Importé par</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRapports.map((r) => {
+                    const keyX = `${r.id}:xlsx`
+                    const keyC = `${r.id}:csv`
+                    const importer = r.created_by_username || 'Non indiqué'
+                    return (
+                      <tr key={r.id}>
+                        <td>
+                          <strong className="reports-table-id">n°{r.id}</strong>
+                        </td>
+                        <td>
+                          {formatDate(r.date_debut)} → {formatDate(r.date_fin)}
+                        </td>
+                        <td>{r.lignes_count ?? 0}</td>
+                        <td>
+                          <span className="reports-importer" title={importer}>
+                            {importer}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="reports-card-actions reports-table-actions">
+                            <LoadingButton
+                              className="reports-btn--primary reports-btn--download"
+                              loading={downloadingRapport === keyX}
+                              loadingText="Téléchargement…"
+                              disabled={busy && downloadingRapport !== keyX}
+                              onClick={() => handleDownloadRapport(r.id, 'xlsx')}
+                            >
+                              Télécharger Excel
+                            </LoadingButton>
+                            <LoadingButton
+                              className="reports-btn--ghost"
+                              loading={downloadingRapport === keyC}
+                              loadingText="Téléchargement…"
+                              disabled={busy && downloadingRapport !== keyC}
+                              onClick={() => handleDownloadRapport(r.id, 'csv')}
+                            >
+                              Télécharger CSV
+                            </LoadingButton>
+                            <LoadingButton
+                              className="reports-btn--edit"
+                              disabled={busy}
+                              onClick={() => setEditingRapportId(r.id)}
+                            >
+                              Modifier
+                            </LoadingButton>
+                            <LoadingButton
+                              className="reports-btn--danger"
+                              loading={deletingRapportId === r.id}
+                              loadingText="Suppression…"
+                              disabled={busy && deletingRapportId !== r.id}
+                              onClick={() => handleDeleteRapport(r)}
+                            >
+                              Supprimer
+                            </LoadingButton>
+                          </div>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <div className="reports-cards">
               {filteredRapports.map((r) => {
@@ -596,12 +671,6 @@ function ReportsPage({ onNavigate }) {
                       </div>
                       <div className="reports-card-meta">
                         {r.lignes_count ?? 0} ligne(s) de relevé
-                        {isAdmin ? (
-                          <>
-                            {' · '}
-                            Envoyé par : <strong>{r.created_by_username || 'Non indiqué'}</strong>
-                          </>
-                        ) : null}
                       </div>
                     </div>
                     <div className="reports-card-actions">
@@ -630,17 +699,6 @@ function ReportsPage({ onNavigate }) {
                       >
                         Modifier
                       </LoadingButton>
-                      {isAdmin && (
-                        <LoadingButton
-                          className="reports-btn--danger"
-                          loading={deletingRapportId === r.id}
-                          loadingText="Suppression…"
-                          disabled={busy && deletingRapportId !== r.id}
-                          onClick={() => handleDeleteRapport(r)}
-                        >
-                          Supprimer
-                        </LoadingButton>
-                      )}
                     </div>
                   </article>
                 )
