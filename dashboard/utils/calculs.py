@@ -7,7 +7,23 @@ notamment le calcul des consommations, des durées de fonctionnement et de l'aut
 """
 
 import re
+<<<<<<< HEAD
 import statistics
+=======
+
+
+def format_rapport_label(report) -> str:
+    """Libellé période pour filtres / axes : date de début (jj/mm/aaaa)."""
+    return report.date_debut.strftime('%d/%m/%Y')
+
+
+def ordered_rapports(queryset=None):
+    """Liste des rapports en ordre chronologique strict."""
+    from dashboard.models import Rapport
+
+    qs = queryset if queryset is not None else Rapport.objects.all()
+    return list(qs.order_by('date_debut', 'date_fin', 'id'))
+>>>>>>> 9913e3fa5ef81f8e893a35648a9333eaf5d170d5
 
 
 def extraire_puissance(value):

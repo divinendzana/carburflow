@@ -1335,6 +1335,20 @@ button.alert-item--link {
   margin-top: 14px;
 }
 
+.chart-box.is-scrollable {
+  cursor: ew-resize;
+}
+
+.chart-box.is-scrollable::after {
+  content: 'Molette : défiler';
+  position: absolute;
+  right: 8px;
+  top: 6px;
+  font-size: 0.68rem;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
 .metric-stack {
   display: grid;
   gap: 16px;

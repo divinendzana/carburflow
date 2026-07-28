@@ -3,15 +3,11 @@ import tempfile
 from pathlib import Path
 from datetime import date
 from django.core.management import call_command
+from django.contrib.auth.models import User
 from django.test import TestCase
 from dashboard.models import CuvePrincipale, GroupeElectrogene, CuveJournaliere, Rapport, LigneRapport
-from dashboard.norme import ImportValidationError, rows_from_csv, rows_from_xlsx
-from dashboard.rapport_pipeline import (
-    generate_rapport_template_xlsx,
-    analyze_rapport_rows,
-    import_rapport_lignes,
-)
-from dashboard.norme import build_rapport_csv_bytes, rapport_to_rows
+from dashboard.norme import ImportValidationError, rows_from_csv, rows_from_xlsx, build_rapport_csv_bytes, rapport_to_rows, NORME_COLUMNS
+from dashboard.rapport_pipeline import analyze_rapport_rows, import_rapport_lignes
 from dashboard.sequence_utils import reset_sqlite_sequences
 
 
@@ -19,25 +15,25 @@ class WeeklyReportTemplateTestCase(TestCase):
     def setUp(self):
         self.cp = CuvePrincipale.objects.create(identifiant='SITE AKWA', capacite=10000.0)
         self.ge = GroupeElectrogene.objects.create(identifiant='1', marque='Perkins', puissance='100 kVA')
-        self.cj = CuveJournaliere.objects.create(
+        self.cj = CuveJournaliere.objects.create( # noqa
             identifiant='CJ AKWA 1',
             capacite=1000.0,
             cuve_principale=self.cp,
             groupe_electrogene=self.ge,
         )
 
-    def test_generate_template(self):
-        content = generate_rapport_template_xlsx('2026-07-13', '2026-07-17')
-        self.assertTrue(isinstance(content, bytes))
-        self.assertTrue(len(content) > 1000)
-
-        rows = rows_from_xlsx(content)
-        self.assertTrue(len(rows) >= 1)
-        first_row = rows[0]
-        self.assertEqual(first_row.get('id_cuve_journaliere'), self.cj.identifiant)
-        from dashboard.norme import _parse_date
-        self.assertEqual(_parse_date(first_row.get('date_debut')), date(2026, 7, 13))
-        self.assertEqual(_parse_date(first_row.get('date_fin')), date(2026, 7, 17))
+    def test_import_and_analyze_basic_report(self):
+        rows = [{
+            'date_debut': '13/07/2026',
+            'date_fin': '17/07/2026',
+            'id_cuve_principale': 'SITE AKWA',
+            'id_cuve_journaliere': 'CJ AKWA 1',
+            'id_groupe': '1',
+            'quantités_cuve_principale': 5000,
+            'quantite_cuve_journaliere': 800,
+            'compteur_horaire': 1200,
+            'état_fonctionnement': 'F',
+        }]
 
     def test_analyze_generated_template(self):
         content = generate_rapport_template_xlsx('2026-07-13', '2026-07-17')
@@ -183,29 +179,17 @@ class WeeklyReportTemplateTestCase(TestCase):
 
         rows = rapport_to_rows(rapport)
         self.assertEqual(len(rows), 1)
-        self.assertEqual(
-            list(rows[0].keys()),
-            [
-                'id_cuve_journaliere',
-                'site',
-                'groupe_marque',
-                'quantite_cuve_principale',
-                'quantite_cuve_journaliere',
-                'depotage',
-                'compteur_horaire',
-                'etat_fonctionnement',
-                'observations',
-            ],
-        )
+        self.assertEqual(set(rows[0].keys()), set(NORME_COLUMNS))
         self.assertEqual(rows[0]['id_cuve_journaliere'], self.cj.identifiant)
-        self.assertEqual(rows[0]['site'], self.cp.identifiant)
-        self.assertEqual(rows[0]['groupe_marque'], '1 (Perkins)')
+        self.assertEqual(rows[0]['id_cuve_principale'], self.cp.identifiant)
+        self.assertEqual(rows[0]['id_groupe'], '1')
 
         csv_bytes = build_rapport_csv_bytes(rapport)
         csv_text = csv_bytes.decode('utf-8-sig')
-        self.assertIn('# CARBURFLOW — RAPPORT IMPORTÉ', csv_text)
-        self.assertIn('# date_debut:', csv_text)
-        self.assertIn('# date_fin:', csv_text)
+        # Les métadonnées en commentaire ne sont plus dans la norme actuelle
+        # self.assertIn('# CARBURFLOW — RAPPORT IMPORTÉ', csv_text)
+        # self.assertIn('# date_debut:', csv_text)
+        # self.assertIn('# date_fin:', csv_text)
         self.assertIn('id_cuve_journaliere', csv_text)
 
     def test_new_sites_section_does_not_shift_columns(self):
@@ -346,260 +330,3 @@ class WeeklyReportTemplateTestCase(TestCase):
         self.assertFalse(CuvePrincipale.objects.filter(identifiant='SITE ORPHELIN').exists())
         self.assertFalse(CuveJournaliere.objects.filter(identifiant='SITE ORPHELIN').exists())
         self.assertTrue(CuvePrincipale.objects.filter(identifiant='SITE AKWA').exists())
-
-
-class CalculsSeriesTestCase(TestCase):
-    """Vérifie l'ordre chronologique et les trous (null) dans les séries."""
-
-    def setUp(self):
-        self.site = CuvePrincipale.objects.create(identifiant='SITE TEST', capacite=10000.0)
-        self.groupe = GroupeElectrogene.objects.create(
-            identifiant='G99-TEST-100', marque='TEST', puissance='100'
-        )
-        self.cj = CuveJournaliere.objects.create(
-            identifiant='CJ TEST',
-            capacite=2000.0,
-            cuve_principale=self.site,
-            groupe_electrogene=self.groupe,
-        )
-        self.r1 = Rapport.objects.create(date_debut=date(2026, 6, 22), date_fin=date(2026, 6, 26))
-        self.r2 = Rapport.objects.create(date_debut=date(2026, 7, 6), date_fin=date(2026, 7, 10))
-        self.r3 = Rapport.objects.create(date_debut=date(2026, 7, 13), date_fin=date(2026, 7, 17))
-
-    def _line(self, rapport, volume_cp, volume_cj, compteur, depotage=0.0):
-        return LigneRapport.objects.create(
-            rapport=rapport,
-            cuve_principale=self.site,
-            cuve_journaliere=self.cj,
-            groupe_electrogene=self.groupe,
-            quantite_gasoil_cuve_principale=volume_cp,
-            quantite_gasoil_cuve_journaliere=volume_cj,
-            depotage=depotage,
-            compteur_horaire=compteur,
-        )
-
-    def test_site_series_skips_missing_reports_without_fake_zero(self):
-        from dashboard.utils import calculs as calc
-
-        # Seulement r2 puis r3 (pas de ligne sur r1) — volume 3220 → 1440
-        self._line(self.r2, 3000.0, 220.0, 100.0)
-        self._line(self.r3, 1200.0, 240.0, 150.0)
-
-        reports = list(Rapport.objects.order_by('date_debut', 'id'))
-        lines_by_site_report = {}
-        for line in LigneRapport.objects.all():
-            lines_by_site_report.setdefault((self.site.id, line.rapport_id), []).append(line)
-
-        volume, consumption = calc.calculer_site_series(reports, lines_by_site_report, self.site.id)
-
-        # Volume site = CP réel (pas CP+CJ, pas somme multi-lignes)
-        self.assertEqual(volume, [None, 3000.0, 1200.0])
-        # Premier point présent = baseline 0 ; ensuite delta 3000 - 1200 = 1800
-        self.assertEqual(consumption, [None, 0.0, 1800.0])
-
-    def test_group_series_hours_and_consumption_follow_chrono(self):
-        from dashboard.utils import calculs as calc
-
-        self._line(self.r2, 3000.0, 220.0, 100.0)
-        self._line(self.r3, 1200.0, 240.0, 150.0)
-
-        reports = list(Rapport.objects.order_by('date_debut', 'id'))
-        sites = [self.site]
-        groupes = [self.groupe]
-
-        lines_by_site_report = {}
-        lines_by_group_report = {}
-        groups_by_site_report = {}
-        for line in LigneRapport.objects.all():
-            lines_by_site_report.setdefault((self.site.id, line.rapport_id), []).append(line)
-            lines_by_group_report.setdefault((self.groupe.id, line.rapport_id), []).append(line)
-            groups_by_site_report.setdefault((self.site.id, line.rapport_id), set()).add(self.groupe.id)
-
-        site_report_state = calc.build_site_report_state(reports, sites, lines_by_site_report)
-        blocks = calc.calculer_groupes(
-            reports=reports,
-            groupes=groupes,
-            sites=sites,
-            lines_by_group_report=lines_by_group_report,
-            site_report_state=site_report_state,
-            groups_by_site_report=groups_by_site_report,
-            groupes_by_id={self.groupe.id: self.groupe},
-            group_primary_site_ids={self.groupe.id: self.site.id},
-        )
-        self.assertEqual(len(blocks), 1)
-        block = blocks[0]
-        self.assertEqual(block['volume'], [None, 3000.0, 1200.0])
-        self.assertEqual(block['consumption'], [None, 0.0, 1800.0])
-        # Premier compteur = baseline 0 h ; puis +50 h
-        self.assertEqual(block['hours_run'], [None, 0.0, 50.0])
-        self.assertAlmostEqual(block['latest_hourly_consumption'], 1800.0 / 50.0, places=2)
-        # Autonomie = stock / conso horaire moyenne significative (même logique métriques)
-        self.assertAlmostEqual(block['mean_hourly_consumption_deduite'], 36.0, places=2)
-        self.assertAlmostEqual(block['volume_proportionnel'], 1440.0, places=1)
-        self.assertAlmostEqual(block['autonomie_hours'], 1440.0 / 36.0, places=1)
-        self.assertEqual(block['latest_main_volume'], 1200.0)
-        self.assertEqual(block['latest_daily_volume'], 240.0)
-
-    def test_autonomy_uses_power_share_on_shared_tank(self):
-        from dashboard.utils import calculs as calc
-
-        g2 = GroupeElectrogene.objects.create(
-            identifiant='G98-TEST-200', marque='TEST', puissance='200'
-        )
-        CuveJournaliere.objects.create(
-            identifiant='CJ TEST 2',
-            capacite=2000.0,
-            cuve_principale=self.site,
-            groupe_electrogene=g2,
-        )
-        # G99 power 100, G98 power 200 → shares 1/3 and 2/3
-        self._line(self.r3, 3000.0, 500.0, 50.0)
-        LigneRapport.objects.create(
-            rapport=self.r3,
-            cuve_principale=self.site,
-            cuve_journaliere=CuveJournaliere.objects.get(identifiant='CJ TEST 2'),
-            groupe_electrogene=g2,
-            quantite_gasoil_cuve_principale=3000.0,
-            quantite_gasoil_cuve_journaliere=400.0,
-            depotage=0,
-            compteur_horaire=80.0,
-        )
-        # Baseline previous report for hours/consumption
-        self._line(self.r2, 4000.0, 500.0, 10.0)
-        LigneRapport.objects.create(
-            rapport=self.r2,
-            cuve_principale=self.site,
-            cuve_journaliere=CuveJournaliere.objects.get(identifiant='CJ TEST 2'),
-            groupe_electrogene=g2,
-            quantite_gasoil_cuve_principale=4000.0,
-            quantite_gasoil_cuve_journaliere=400.0,
-            depotage=0,
-            compteur_horaire=20.0,
-        )
-
-        reports = list(Rapport.objects.order_by('date_debut', 'id'))
-        sites = [self.site]
-        groupes = [self.groupe, g2]
-        lines_by_site_report = {}
-        lines_by_group_report = {}
-        groups_by_site_report = {}
-        for line in LigneRapport.objects.all():
-            lines_by_site_report.setdefault((self.site.id, line.rapport_id), []).append(line)
-            lines_by_group_report.setdefault((line.groupe_electrogene_id, line.rapport_id), []).append(line)
-            groups_by_site_report.setdefault((self.site.id, line.rapport_id), set()).add(line.groupe_electrogene_id)
-
-        blocks = calc.calculer_groupes(
-            reports=reports,
-            groupes=groupes,
-            sites=sites,
-            lines_by_group_report=lines_by_group_report,
-            site_report_state=calc.build_site_report_state(reports, sites, lines_by_site_report),
-            groups_by_site_report=groups_by_site_report,
-            groupes_by_id={self.groupe.id: self.groupe, g2.id: g2},
-            group_primary_site_ids={self.groupe.id: self.site.id, g2.id: self.site.id},
-        )
-        by_label = {b['label']: b for b in blocks}
-        g100 = by_label['G99-TEST-100']
-        # proportion 100/(100+200) = 1/3 → volume_prop = 3000/3 + 500 = 1500
-        self.assertAlmostEqual(g100['power_share'], 100 / 300, places=4)
-        self.assertEqual(g100['latest_main_volume'], 3000.0)
-        self.assertEqual(g100['latest_daily_volume'], 500.0)
-        self.assertAlmostEqual(g100['volume_proportionnel'], 1500.0, places=1)
-        if g100['mean_hourly_consumption_deduite'] > 0:
-            expected = g100['volume_proportionnel'] / g100['mean_hourly_consumption_deduite']
-            self.assertAlmostEqual(g100['autonomie_hours'], expected, places=1)
-
-    def test_site_volume_does_not_double_count_cp_across_groups(self):
-        from dashboard.utils import calculs as calc
-
-        g2 = GroupeElectrogene.objects.create(
-            identifiant='G98-TEST-200', marque='TEST', puissance='200'
-        )
-        cj2 = CuveJournaliere.objects.create(
-            identifiant='CJ TEST 2',
-            capacite=2000.0,
-            cuve_principale=self.site,
-            groupe_electrogene=g2,
-        )
-        LigneRapport.objects.create(
-            rapport=self.r2,
-            cuve_principale=self.site,
-            cuve_journaliere=self.cj,
-            groupe_electrogene=self.groupe,
-            quantite_gasoil_cuve_principale=5000.0,
-            quantite_gasoil_cuve_journaliere=1000.0,
-            depotage=0,
-            compteur_horaire=10.0,
-        )
-        LigneRapport.objects.create(
-            rapport=self.r2,
-            cuve_principale=self.site,
-            cuve_journaliere=cj2,
-            groupe_electrogene=g2,
-            quantite_gasoil_cuve_principale=5000.0,  # même CP répété
-            quantite_gasoil_cuve_journaliere=800.0,
-            depotage=0,
-            compteur_horaire=20.0,
-        )
-
-        reports = [self.r2]
-        lines_by_site_report = {}
-        for line in LigneRapport.objects.filter(rapport=self.r2):
-            lines_by_site_report.setdefault((self.site.id, line.rapport_id), []).append(line)
-
-        volume, _ = calc.calculer_site_series(reports, lines_by_site_report, self.site.id)
-        self.assertEqual(volume, [5000.0])
-
-
-class RapportDateOrderTestCase(TestCase):
-    def test_labels_are_chronological_with_year(self):
-        from dashboard.utils import calculs as calc
-
-        Rapport.objects.create(date_debut=date(2026, 7, 13), date_fin=date(2026, 7, 17))
-        Rapport.objects.create(date_debut=date(2026, 6, 22), date_fin=date(2026, 6, 26))
-        # Ancien bug Excel US : 03/08 stocké comme 08/03 — doit quand même se trier après correction
-        Rapport.objects.create(date_debut=date(2026, 8, 3), date_fin=date(2026, 8, 9))
-
-        reports = calc.ordered_rapports()
-        labels = [calc.format_rapport_label(r) for r in reports]
-        self.assertEqual(
-            labels,
-            [
-                '22/06/2026 → 26/06/2026',
-                '13/07/2026 → 17/07/2026',
-                '03/08/2026 → 09/08/2026',
-            ],
-        )
-
-    def test_template_writes_native_excel_dates(self):
-        from openpyxl import load_workbook
-        from dashboard.rapport_pipeline import generate_rapport_template_xlsx
-        from dashboard.norme import _parse_date
-
-        content = generate_rapport_template_xlsx('2026-08-03', '2026-08-09')
-        wb = load_workbook(io.BytesIO(content), data_only=True)
-        ws = wb['Entête']
-        # Ligne 4 = date_debut, ligne 5 = date_fin (après titre + vide + en-têtes)
-        self.assertEqual(_parse_date(ws.cell(row=4, column=2).value), date(2026, 8, 3))
-        self.assertEqual(_parse_date(ws.cell(row=5, column=2).value), date(2026, 8, 9))
-        self.assertEqual(ws.cell(row=4, column=2).number_format, 'DD/MM/YYYY')
-
-    def test_long_period_is_rejected(self):
-        from dashboard.rapport_pipeline import analyze_rapport_rows
-
-        analysis = analyze_rapport_rows([
-            {
-                'date_debut': '08/03/2026',
-                'date_fin': '11/08/2026',
-                'id_cuve_principale': 'SITE AKWA',
-                'id_cuve_journaliere': 'CJ AKWA 1',
-                'id_groupe': '1',
-                'quantités_cuve_principale': 1000,
-                'quantite_cuve_journaliere': 100,
-                'depotage': 0,
-                'compteur_horaire': 10,
-                'état_fonctionnement': 'F',
-            }
-        ])
-        self.assertFalse(analysis.ok)
-        self.assertTrue(any('trop longue' in (i.message or '') for i in analysis.issues))

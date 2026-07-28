@@ -76,5 +76,5 @@ Ce groupe contient la logique métier pour l'import et l'export des rapports.
 Ces points de terminaison fournissent des données agrégées et calculées, spécifiquement pour les pages du tableau de bord.
 - `GET /dashboard/overview`: Données clés pour la page d'accueil (KPIs, alertes).
 - `GET /dashboard/sites`: Données consolidées pour la page "Sites".
-- `GET /dashboard/groupes`: Données pour la page "Groupes Électrogènes".
-- `GET /dashboard/cuves`: Données pour la page "Cuves".
+- `GET /dashboard/data?page=groupes`: Données pour la page "Groupes Électrogènes".
+- `GET /dashboard/data?page=cuves`: Données pour la page "Cuves".

@@ -6,7 +6,7 @@ import AutonomyBadge from '../components/AutonomyBadge.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import PageEnter from '../components/PageEnter.jsx'
 import { useChartPalette } from '../hooks/useChartPalette.js'
-import { createChart, seriesPointRadius, xAxisTicks } from '../utils/chartAxis.js'
+import { createChart, defaultPeriodIndices, MAX_CHART_WEEKS, seriesPointRadius, toChartLabels, visibleChartRange, xAxisTicks } from '../utils/chartAxis.js'
 import {
   formatAutonomyValue,
   getAutonomySeverity,
@@ -264,6 +264,7 @@ function GroupsPage({ onNavigate }) {
   const [mode, setMode] = useState(queryMode || (queryGroupId ? 'details' : 'all'))
   const [filtering, setFiltering] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
+  const [chartPan, setChartPan] = useState(0)
   const filterSeq = useRef(0)
 
   const reportChoices = useMemo(() => (groupsData?.rapport_choices || groupsData?.report_choices || []), [groupsData])
@@ -281,6 +282,16 @@ function GroupsPage({ onNavigate }) {
   }, [rapportFin, reportChoices])
   const startIndex = Math.min(rapportDebutIndex, rapportFinIndex)
   const endIndex = Math.max(rapportDebutIndex, rapportFinIndex)
+  const chartWindow = useMemo(
+    () => visibleChartRange(startIndex, endIndex, chartPan),
+    [startIndex, endIndex, chartPan],
+  )
+  const { viewStart, viewEnd, maxPan, canScroll } = chartWindow
+
+  useEffect(() => {
+    // Afficher les 4 semaines les plus récentes de la période sélectionnée
+    setChartPan(Math.max(0, endIndex - startIndex + 1 - MAX_CHART_WEEKS))
+  }, [startIndex, endIndex])
 
   const loadGroupsData = async (queryParams = '', options = {}) => {
     const seq = ++filterSeq.current
@@ -301,12 +312,11 @@ function GroupsPage({ onNavigate }) {
         ...data,
         group_blocks: normalizedBlocks,
       })
-      // L’API Groupes ignore rapport_debut/fin : ne pas écraser la période choisie côté client
+      // L’API Groupes ignore rapport_debut/fin : période client = 4 dernières semaines par défaut
       if (!options.preservePeriod) {
-        const nextDebut = data.selected_rapport_debut != null ? String(data.selected_rapport_debut) : String(choices[0]?.id ?? '')
-        const nextFin = data.selected_rapport_fin != null ? String(data.selected_rapport_fin) : String(choices[choices.length - 1]?.id ?? '')
-        setRapportDebut(nextDebut)
-        setRapportFin(nextFin)
+        const { first, last } = defaultPeriodIndices(choices.length)
+        setRapportDebut(String(choices[first]?.id ?? ''))
+        setRapportFin(String(choices[last]?.id ?? ''))
       }
       if (!options.preserveSiteSelection) {
         const nextSite = data.selected_site_id != null ? String(data.selected_site_id) : ''
@@ -346,9 +356,16 @@ function GroupsPage({ onNavigate }) {
   }
 
   useEffect(() => {
-    if (!window.Chart || !groupsData) return undefined
+    if (!window.Chart || !groupsData || mode === 'all') return undefined
     const charts = []
+<<<<<<< HEAD
     const sliceSeries = (values = []) => (values || []).slice(startIndex, endIndex + 1)
+=======
+    const fullLabels = groupsData.labels || []
+    const labels = toChartLabels(fullLabels.slice(viewStart, viewEnd + 1))
+    const fullLabelsWindow = fullLabels.slice(viewStart, viewEnd + 1)
+    const sliceSeries = (values = []) => (values || []).slice(viewStart, viewEnd + 1)
+>>>>>>> 9913e3fa5ef81f8e893a35648a9333eaf5d170d5
     const baseOptions = (unit, beginZero = false, suggestedMax = undefined) => ({
       responsive: true,
       maintainAspectRatio: false,
@@ -367,11 +384,18 @@ function GroupsPage({ onNavigate }) {
           padding: 10,
           callbacks: {
 <<<<<<< HEAD
+<<<<<<< HEAD
             title: (context) => `Le ${context[0].label}`,
             label: (context) => {
               const value = context.parsed.y
               return `${context.dataset.label}: ${value.toLocaleString('fr-FR')} ${unit}`
 =======
+=======
+            title: (items) => {
+              const idx = items?.[0]?.dataIndex
+              return fullLabelsWindow[idx] != null ? String(fullLabelsWindow[idx]) : ''
+            },
+>>>>>>> 9913e3fa5ef81f8e893a35648a9333eaf5d170d5
             label: (context) => {
               const y = context.parsed?.y
               const kind = context.dataset?.pointKinds?.[context.dataIndex]
@@ -476,9 +500,9 @@ function GroupsPage({ onNavigate }) {
           if (kind === 'missing') return 'transparent'
           return color
         })
-        const pointRadius = slicedKinds.map((kind) => {
+        const pointRadiusPts = slicedKinds.map((kind) => {
           if (kind === 'missing') return 0
-          if (kind === 'infinite') return labels.length > 12 ? 5 : 7
+          if (kind === 'infinite') return 7
           return seriesPointRadius(labels.length)
         })
         const pointStyle = slicedKinds.map((kind) => (
@@ -502,8 +526,8 @@ function GroupsPage({ onNavigate }) {
               pointKinds: slicedKinds,
               pointBackgroundColor,
               pointBorderColor,
-              pointRadius,
-              pointHoverRadius: pointRadius.map((radius) => Math.max(radius, 4) + 2),
+              pointRadius: pointRadiusPts,
+              pointHoverRadius: pointRadiusPts.map((radius) => Math.max(radius, 4) + 2),
               pointStyle,
               pointBorderWidth: 2,
             }],
@@ -533,8 +557,20 @@ function GroupsPage({ onNavigate }) {
       }
     })
 
-    return () => charts.forEach((chart) => chart.destroy())
-  }, [chartPalette, groupsData, startIndex, endIndex, mode])
+    const onWheel = (event) => {
+      if (!canScroll) return
+      event.preventDefault()
+      const step = event.deltaY > 0 ? 1 : -1
+      setChartPan((prev) => Math.min(maxPan, Math.max(0, prev + step)))
+    }
+    const chartBoxes = document.querySelectorAll('.group-card .chart-box')
+    chartBoxes.forEach((box) => box.addEventListener('wheel', onWheel, { passive: false }))
+
+    return () => {
+      charts.forEach((chart) => chart.destroy())
+      chartBoxes.forEach((box) => box.removeEventListener('wheel', onWheel))
+    }
+  }, [chartPalette, groupsData, viewStart, viewEnd, mode, canScroll, maxPan])
 
   const selectedSite = groupsData?.sites?.find((site) => String(site.id) === String(siteId)) ?? groupsData?.sites?.[0]
 
@@ -874,11 +910,11 @@ function GroupsPage({ onNavigate }) {
               <div className="group-curve-grid">
                 <div className="chart-card">
                   <span className="curve-title">Courbe delta horaire</span>
-                  <div className="chart-box small-box"><canvas id={`chart-group-${group.id}-hours`} /></div>
+                  <div className={`chart-box small-box${canScroll ? ' is-scrollable' : ''}`}><canvas id={`chart-group-${group.id}-hours`} /></div>
                 </div>
                 <div className="chart-card">
                   <span className="curve-title">Courbe consommation</span>
-                  <div className="chart-box small-box"><canvas id={`chart-group-${group.id}-consumption`} /></div>
+                  <div className={`chart-box small-box${canScroll ? ' is-scrollable' : ''}`}><canvas id={`chart-group-${group.id}-consumption`} /></div>
                 </div>
                 <div className="chart-card">
                   <span className="curve-title">Courbe consommation horaire</span>
@@ -896,7 +932,7 @@ function GroupsPage({ onNavigate }) {
                       </div>
                     )
                   })()}
-                  <div className="chart-box small-box"><canvas id={`chart-group-${group.id}-hourly-consumption`} /></div>
+                  <div className={`chart-box small-box${canScroll ? ' is-scrollable' : ''}`}><canvas id={`chart-group-${group.id}-hourly-consumption`} /></div>
                 </div>
               </div>
             </article>
