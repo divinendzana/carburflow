@@ -392,9 +392,10 @@ class CalculsSeriesTestCase(TestCase):
 
         volume, consumption = calc.calculer_site_series(reports, lines_by_site_report, self.site.id)
 
-        self.assertEqual(volume, [None, 3220.0, 1440.0])
-        # Premier point présent = baseline 0 ; ensuite delta 3220 - 1440 = 1780
-        self.assertEqual(consumption, [None, 0.0, 1780.0])
+        # Volume site = CP réel (pas CP+CJ, pas somme multi-lignes)
+        self.assertEqual(volume, [None, 3000.0, 1200.0])
+        # Premier point présent = baseline 0 ; ensuite delta 3000 - 1200 = 1800
+        self.assertEqual(consumption, [None, 0.0, 1800.0])
 
     def test_group_series_hours_and_consumption_follow_chrono(self):
         from dashboard.utils import calculs as calc
@@ -427,11 +428,127 @@ class CalculsSeriesTestCase(TestCase):
         )
         self.assertEqual(len(blocks), 1)
         block = blocks[0]
-        self.assertEqual(block['volume'], [None, 3220.0, 1440.0])
-        self.assertEqual(block['consumption'], [None, 0.0, 1780.0])
+        self.assertEqual(block['volume'], [None, 3000.0, 1200.0])
+        self.assertEqual(block['consumption'], [None, 0.0, 1800.0])
         # Premier compteur = baseline 0 h ; puis +50 h
         self.assertEqual(block['hours_run'], [None, 0.0, 50.0])
-        self.assertAlmostEqual(block['latest_hourly_consumption'], 1780.0 / 50.0, places=2)
+        self.assertAlmostEqual(block['latest_hourly_consumption'], 1800.0 / 50.0, places=2)
+        # Autonomie = stock / conso horaire moyenne significative (même logique métriques)
+        self.assertAlmostEqual(block['mean_hourly_consumption_deduite'], 36.0, places=2)
+        self.assertAlmostEqual(block['volume_proportionnel'], 1440.0, places=1)
+        self.assertAlmostEqual(block['autonomie_hours'], 1440.0 / 36.0, places=1)
+        self.assertEqual(block['latest_main_volume'], 1200.0)
+        self.assertEqual(block['latest_daily_volume'], 240.0)
+
+    def test_autonomy_uses_power_share_on_shared_tank(self):
+        from dashboard.utils import calculs as calc
+
+        g2 = GroupeElectrogene.objects.create(
+            identifiant='G98-TEST-200', marque='TEST', puissance='200'
+        )
+        CuveJournaliere.objects.create(
+            identifiant='CJ TEST 2',
+            capacite=2000.0,
+            cuve_principale=self.site,
+            groupe_electrogene=g2,
+        )
+        # G99 power 100, G98 power 200 → shares 1/3 and 2/3
+        self._line(self.r3, 3000.0, 500.0, 50.0)
+        LigneRapport.objects.create(
+            rapport=self.r3,
+            cuve_principale=self.site,
+            cuve_journaliere=CuveJournaliere.objects.get(identifiant='CJ TEST 2'),
+            groupe_electrogene=g2,
+            quantite_gasoil_cuve_principale=3000.0,
+            quantite_gasoil_cuve_journaliere=400.0,
+            depotage=0,
+            compteur_horaire=80.0,
+        )
+        # Baseline previous report for hours/consumption
+        self._line(self.r2, 4000.0, 500.0, 10.0)
+        LigneRapport.objects.create(
+            rapport=self.r2,
+            cuve_principale=self.site,
+            cuve_journaliere=CuveJournaliere.objects.get(identifiant='CJ TEST 2'),
+            groupe_electrogene=g2,
+            quantite_gasoil_cuve_principale=4000.0,
+            quantite_gasoil_cuve_journaliere=400.0,
+            depotage=0,
+            compteur_horaire=20.0,
+        )
+
+        reports = list(Rapport.objects.order_by('date_debut', 'id'))
+        sites = [self.site]
+        groupes = [self.groupe, g2]
+        lines_by_site_report = {}
+        lines_by_group_report = {}
+        groups_by_site_report = {}
+        for line in LigneRapport.objects.all():
+            lines_by_site_report.setdefault((self.site.id, line.rapport_id), []).append(line)
+            lines_by_group_report.setdefault((line.groupe_electrogene_id, line.rapport_id), []).append(line)
+            groups_by_site_report.setdefault((self.site.id, line.rapport_id), set()).add(line.groupe_electrogene_id)
+
+        blocks = calc.calculer_groupes(
+            reports=reports,
+            groupes=groupes,
+            sites=sites,
+            lines_by_group_report=lines_by_group_report,
+            site_report_state=calc.build_site_report_state(reports, sites, lines_by_site_report),
+            groups_by_site_report=groups_by_site_report,
+            groupes_by_id={self.groupe.id: self.groupe, g2.id: g2},
+            group_primary_site_ids={self.groupe.id: self.site.id, g2.id: self.site.id},
+        )
+        by_label = {b['label']: b for b in blocks}
+        g100 = by_label['G99-TEST-100']
+        # proportion 100/(100+200) = 1/3 → volume_prop = 3000/3 + 500 = 1500
+        self.assertAlmostEqual(g100['power_share'], 100 / 300, places=4)
+        self.assertEqual(g100['latest_main_volume'], 3000.0)
+        self.assertEqual(g100['latest_daily_volume'], 500.0)
+        self.assertAlmostEqual(g100['volume_proportionnel'], 1500.0, places=1)
+        if g100['mean_hourly_consumption_deduite'] > 0:
+            expected = g100['volume_proportionnel'] / g100['mean_hourly_consumption_deduite']
+            self.assertAlmostEqual(g100['autonomie_hours'], expected, places=1)
+
+    def test_site_volume_does_not_double_count_cp_across_groups(self):
+        from dashboard.utils import calculs as calc
+
+        g2 = GroupeElectrogene.objects.create(
+            identifiant='G98-TEST-200', marque='TEST', puissance='200'
+        )
+        cj2 = CuveJournaliere.objects.create(
+            identifiant='CJ TEST 2',
+            capacite=2000.0,
+            cuve_principale=self.site,
+            groupe_electrogene=g2,
+        )
+        LigneRapport.objects.create(
+            rapport=self.r2,
+            cuve_principale=self.site,
+            cuve_journaliere=self.cj,
+            groupe_electrogene=self.groupe,
+            quantite_gasoil_cuve_principale=5000.0,
+            quantite_gasoil_cuve_journaliere=1000.0,
+            depotage=0,
+            compteur_horaire=10.0,
+        )
+        LigneRapport.objects.create(
+            rapport=self.r2,
+            cuve_principale=self.site,
+            cuve_journaliere=cj2,
+            groupe_electrogene=g2,
+            quantite_gasoil_cuve_principale=5000.0,  # même CP répété
+            quantite_gasoil_cuve_journaliere=800.0,
+            depotage=0,
+            compteur_horaire=20.0,
+        )
+
+        reports = [self.r2]
+        lines_by_site_report = {}
+        for line in LigneRapport.objects.filter(rapport=self.r2):
+            lines_by_site_report.setdefault((self.site.id, line.rapport_id), []).append(line)
+
+        volume, _ = calc.calculer_site_series(reports, lines_by_site_report, self.site.id)
+        self.assertEqual(volume, [5000.0])
 
 
 class RapportDateOrderTestCase(TestCase):

@@ -76,15 +76,36 @@ def last_finite(values):
 
 
 def _site_volume_from_lines(lines) -> float:
-    return sum(
-        float(l.quantite_gasoil_cuve_principale or 0.0)
-        + float(l.quantite_gasoil_cuve_journaliere or 0.0)
+    """
+    Volume du site = stock réel de la cuve principale (une seule lecture).
+
+    Chaque ligne groupe répète le même volume CP : on ne somme PAS les CP,
+    ni les cuves journalières rattachées.
+    """
+    cp_values = [
+        float(l.quantite_gasoil_cuve_principale)
         for l in lines
-    )
+        if l.quantite_gasoil_cuve_principale is not None
+    ]
+    if not cp_values:
+        return 0.0
+    return max(cp_values)
 
 
 def _site_depotage_from_lines(lines) -> float:
-    return sum(float(l.depotage or 0.0) for l in lines)
+    """
+    Dépotage site : si la même valeur est répétée sur chaque ligne groupe,
+    on ne la compte qu’une fois ; sinon on somme les apports distincts.
+    """
+    values = [float(l.depotage or 0.0) for l in lines]
+    nonzero = [v for v in values if v > 0]
+    if not nonzero:
+        return 0.0
+    rounded = {round(v, 3) for v in nonzero}
+    if len(rounded) == 1:
+        return nonzero[0]
+    return sum(nonzero)
+
 
 
 def calculer_site_series(reports, lines_by_site_report, site_id):
@@ -164,11 +185,42 @@ def calculer_groupes(
     groupes_by_id,
     group_primary_site_ids,
     selected_site_id=None,
+    groups_linked_by_site=None,
 ):
     """
     Calcule les données complètes pour chaque groupe avec partage de la
     consommation au prorata de la puissance.
+
+    Autonomie (à l’instant T) :
+      1. proportion = P_groupe / Σ P_groupes liés à la même cuve principale
+      2. volume_proportionnel = (volume_CP × proportion) + volume_CJ_du_groupe
+      3. autonomie_h = volume_proportionnel / conso_horaire_moyenne
+         (moyenne des L/h significatifs, hors 0 et ∞)
     """
+    # Groupes durablement rattachés à chaque site (via cuves journalières),
+    # pour la proportion d’autonomie — pas seulement ceux présents sur un rapport.
+    if groups_linked_by_site is None:
+        from dashboard.models import CuveJournaliere
+
+        groups_linked_by_site = {}
+        for cj in CuveJournaliere.objects.filter(
+            cuve_principale_id__isnull=False,
+            groupe_electrogene_id__isnull=False,
+        ).only('cuve_principale_id', 'groupe_electrogene_id'):
+            g = groupes_by_id.get(cj.groupe_electrogene_id)
+            if g is not None:
+                groups_linked_by_site.setdefault(cj.cuve_principale_id, [])
+                if g not in groups_linked_by_site[cj.cuve_principale_id]:
+                    groups_linked_by_site[cj.cuve_principale_id].append(g)
+
+        # Fallback : sites sans CJ → groupes déjà connus via primary_site
+        for groupe in groupes:
+            site_id = group_primary_site_ids.get(groupe.id)
+            if site_id is not None:
+                bucket = groups_linked_by_site.setdefault(site_id, [])
+                if groupe not in bucket:
+                    bucket.append(groupe)
+
     group_blocks = []
     for groupe in groupes:
         primary_site_id = group_primary_site_ids.get(groupe.id)
@@ -180,6 +232,19 @@ def calculer_groupes(
         weighted_volumes = []
         consumed_deltas = []
         previous_counter = None
+
+        # Proportion stable (tous les groupes liés à la CP)
+        linked_groups = list(groups_linked_by_site.get(primary_site_id, [])) if primary_site_id else [groupe]
+        if groupe not in linked_groups:
+            linked_groups = list(linked_groups) + [groupe]
+        total_linked_power = sum(extraire_puissance(g.puissance) for g in linked_groups)
+        group_power = extraire_puissance(groupe.puissance)
+        if total_linked_power > 0:
+            power_share = group_power / total_linked_power
+        elif linked_groups:
+            power_share = 1.0 / len(linked_groups)
+        else:
+            power_share = 1.0
 
         for report in reports:
             lines = lines_by_group_report.get((groupe.id, report.id), [])
@@ -222,24 +287,24 @@ def calculer_groupes(
             site_current_volume = float(site_state.get('current_volume') or 0.0)
             site_delta = float(site_state.get('delta') or 0.0)
 
+            # Conso période : partage au prorata des groupes ACTIFS sur ce rapport
             active_group_ids = (
                 groups_by_site_report.get((primary_site_id, report.id), set())
                 if primary_site_id is not None
                 else set()
             )
             report_groups = [groupes_by_id[gid] for gid in active_group_ids if gid in groupes_by_id]
-
-            total_power = sum(extraire_puissance(g.puissance) for g in report_groups)
-            if total_power > 0:
-                group_share = extraire_puissance(groupe.puissance) / total_power
+            total_power_report = sum(extraire_puissance(g.puissance) for g in report_groups)
+            if total_power_report > 0:
+                period_share = extraire_puissance(groupe.puissance) / total_power_report
             elif report_groups:
-                group_share = 1.0 / len(report_groups)
+                period_share = 1.0 / len(report_groups)
             else:
-                group_share = 1.0
+                period_share = 1.0
 
-            # Stock réel pondéré (pas une reconstruction cumulative des deltas)
-            weighted_report_volume = round(site_current_volume * group_share, 1)
-            weighted_report_delta = round(site_delta * group_share, 1)
+            # Volume courbe / autonomie : proportion stable × volume CP réel
+            weighted_report_volume = round(site_current_volume * power_share, 1)
+            weighted_report_delta = round(site_delta * period_share, 1)
 
             volume.append(weighted_report_volume)
             weighted_volumes.append(weighted_report_volume)
@@ -250,22 +315,14 @@ def calculer_groupes(
         total_hours = sum(finite_hours)
         total_consumed = sum(d for d in finite_deltas if d > 0)
         has_infinite_cons = any(
-            h is not None and h == 0 and d is not None and d > 0
+            d is not None and d > 0 and (h is None or h == 0)
             for h, d in zip(hours_run, consumed_deltas)
         )
 
         if total_hours > 0:
             mean_hourly_consumption = total_consumed / total_hours
-            is_infinite_consumption = False
-            is_infinite_autonomy = mean_hourly_consumption == 0.0
-        elif has_infinite_cons:
-            mean_hourly_consumption = 0.0
-            is_infinite_consumption = True
-            is_infinite_autonomy = False
         else:
             mean_hourly_consumption = 0.0
-            is_infinite_consumption = False
-            is_infinite_autonomy = True
 
         per_period_rates = []
         for h, d in zip(hours_run, consumed_deltas):
@@ -283,21 +340,6 @@ def calculer_groupes(
                 latest_hourly_consumption = d / h
                 break
 
-        autonomy_hours = None
-        formatted_autonomy = None
-        latest_group_volume = last_finite(weighted_volumes)
-
-        if is_infinite_consumption:
-            autonomy_hours = 0.0
-            formatted_autonomy = "0h"
-        elif is_infinite_autonomy:
-            autonomy_hours = None
-            formatted_autonomy = "∞"
-        elif mean_hourly_consumption > 0 and latest_group_volume is not None:
-            autonomy_hours = latest_group_volume / mean_hourly_consumption
-            formatted_autonomy = formater_autonomie(autonomy_hours)
-
-        # Dernier rapport où le groupe est réellement présent
         latest_main_volume = None
         latest_daily_volume = None
         for report in reversed(reports):
@@ -305,19 +347,48 @@ def calculer_groupes(
             if primary_site_id is not None:
                 last_lines = [l for l in last_lines if l.cuve_principale_id == primary_site_id]
             if last_lines:
-                latest_main_volume = round(
-                    sum(float(l.quantite_gasoil_cuve_principale or 0.0) for l in last_lines), 1
-                )
-                latest_daily_volume = round(
-                    sum(float(l.quantite_gasoil_cuve_journaliere or 0.0) for l in last_lines), 1
-                )
+                cp_vals = [
+                    float(l.quantite_gasoil_cuve_principale)
+                    for l in last_lines
+                    if l.quantite_gasoil_cuve_principale is not None
+                ]
+                cj_vals = [
+                    float(l.quantite_gasoil_cuve_journaliere or 0.0)
+                    for l in last_lines
+                ]
+                latest_main_volume = round(max(cp_vals), 1) if cp_vals else None
+                latest_daily_volume = round(sum(cj_vals), 1) if cj_vals else None
                 break
+
+        # Autonomie = (volume_CP × proportion + CJ groupe) / conso_horaire_moyenne
+        volume_proportionnel = None
+        if latest_main_volume is not None:
+            cj_part = float(latest_daily_volume or 0.0)
+            volume_proportionnel = round(latest_main_volume * power_share + cj_part, 1)
+        autonomy_hours = None
+        formatted_autonomy = None
+
+        # Anomalie « conso sans delta horaire » : indépendante du calcul d’autonomie
+        is_infinite_consumption = bool(has_infinite_cons)
+
+        if mean_hourly_consumption_deduite > 0 and volume_proportionnel is not None:
+            is_infinite_autonomy = False
+            autonomy_hours = volume_proportionnel / mean_hourly_consumption_deduite
+            formatted_autonomy = formater_autonomie(autonomy_hours)
+        else:
+            # Pas de conso horaire moyenne significative (« - ») → autonomie indéterminée
+            is_infinite_autonomy = True
+            autonomy_hours = None
+            formatted_autonomy = "∞"
 
         group_blocks.append({
             'id': groupe.id,
-            'label': f"{groupe.identifiant} ({groupe.marque} {groupe.puissance})",
+            'label': groupe.identifiant,
             'site_id': primary_site_id,
             'site_nom': next((site.identifiant for site in sites if site.id == primary_site_id), ''),
+            'puissance': groupe.puissance,
+            'power_share': round(power_share, 4),
+            'volume_proportionnel': volume_proportionnel,
             'hours_run': hours_run,
             'volume': volume,
             'weighted_volume': weighted_volumes,

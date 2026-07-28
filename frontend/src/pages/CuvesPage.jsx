@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
 import WelcomeBanner from '../components/WelcomeBanner.jsx'
 import { apiFetch } from '../auth.js'
@@ -6,6 +6,7 @@ import PageLoader from '../components/PageLoader.jsx'
 import PageEnter from '../components/PageEnter.jsx'
 import AnimatedContent from '../components/reactbits/AnimatedContent.jsx'
 import { useChartPalette } from '../hooks/useChartPalette.js'
+import { createChart, seriesPointRadius, xAxisTicks } from '../utils/chartAxis.js'
 import { METRIC_LABELS } from '../utils/format.js'
 
 const renderDelta = (metric, suffix = '') => {
@@ -33,13 +34,11 @@ function CuvesPage({ onNavigate }) {
   const [cuvesData, setCuvesData] = useState(null)
   const [rapportDebut, setRapportDebut] = useState('')
   const [rapportFin, setRapportFin] = useState('')
-  const [draftRapportDebut, setDraftRapportDebut] = useState('')
-  const [draftRapportFin, setDraftRapportFin] = useState('')
   const [siteId, setSiteId] = useState('')
-  const [draftSiteId, setDraftSiteId] = useState('')
   const [loadError, setLoadError] = useState('')
   const [filtering, setFiltering] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
+  const filterSeq = useRef(0)
 
   const reportChoices = useMemo(() => (cuvesData?.rapport_choices || []), [cuvesData])
   const rapportDebutIndex = useMemo(() => {
@@ -55,11 +54,13 @@ function CuvesPage({ onNavigate }) {
   const startIndex = Math.min(rapportDebutIndex, rapportFinIndex)
   const endIndex = Math.max(rapportDebutIndex, rapportFinIndex)
 
-  const loadCuvesData = async (queryParams = '', { isFilter = false } = {}) => {
+  const loadCuvesData = async (queryParams = '', { isFilter = false, preserveSiteSelection = false } = {}) => {
+    const seq = ++filterSeq.current
     try {
       setLoadError('')
       if (isFilter) setFiltering(true)
       const data = await apiFetch(`/api/v1/dashboard/cuves${queryParams ? `?${queryParams}` : ''}`)
+      if (seq !== filterSeq.current) return
       setCuvesData(data)
       const nextDebut = data.selected_rapport_debut != null
         ? String(data.selected_rapport_debut)
@@ -70,18 +71,20 @@ function CuvesPage({ onNavigate }) {
       const nextSite = data.selected_site_id != null ? String(data.selected_site_id) : ''
       setRapportDebut(nextDebut)
       setRapportFin(nextFin)
-      setDraftRapportDebut(nextDebut)
-      setDraftRapportFin(nextFin)
-      // Garder « Tous les sites » si l’API ne filtre pas
-      setSiteId(nextSite)
-      setDraftSiteId(nextSite)
+      if (!preserveSiteSelection) {
+        setSiteId(nextSite)
+      }
     } catch (error) {
       console.warn('Cuves backend unavailable.', error)
-      setLoadError(error.message || 'Impossible de charger les cuves.')
-      if (!isFilter) setCuvesData(null)
+      if (seq === filterSeq.current) {
+        setLoadError(error.message || 'Impossible de charger les cuves.')
+        if (!isFilter) setCuvesData(null)
+      }
     } finally {
-      setFiltering(false)
-      setInitialLoading(false)
+      if (seq === filterSeq.current) {
+        setFiltering(false)
+        setInitialLoading(false)
+      }
     }
   }
 
@@ -90,20 +93,38 @@ function CuvesPage({ onNavigate }) {
     loadCuvesData()
   }, [])
 
+  const runFilters = async (next = {}) => {
+    const debut = next.rapportDebut ?? rapportDebut
+    const fin = next.rapportFin ?? rapportFin
+    const site = next.siteId !== undefined ? next.siteId : siteId
+    if (next.rapportDebut != null) setRapportDebut(next.rapportDebut)
+    if (next.rapportFin != null) setRapportFin(next.rapportFin)
+    if (next.siteId !== undefined) setSiteId(next.siteId)
+    const params = new URLSearchParams()
+    if (debut) params.set('rapport_debut', debut)
+    if (fin) params.set('rapport_fin', fin)
+    if (site) params.set('site_id', site)
+    await loadCuvesData(params.toString(), { isFilter: true, preserveSiteSelection: true })
+  }
+
   useEffect(() => {
-    if (!window.Chart || !cuvesData || filtering) {
+    if (!window.Chart || !cuvesData) {
       return undefined
     }
 
     const charts = []
     const labels = (cuvesData.labels || []).slice(startIndex, endIndex + 1)
+    const pointRadius = seriesPointRadius(labels.length)
     const baseOptions = (unit = 'L') => ({
       responsive: true,
       maintainAspectRatio: false,
       spanGaps: true,
       plugins: { legend: { display: false } },
       scales: {
-        x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
+        x: {
+          ticks: xAxisTicks(labels.length, chartPalette.text),
+          grid: { color: chartPalette.grid },
+        },
         y: {
           beginAtZero: true,
           ticks: {
@@ -119,7 +140,7 @@ function CuvesPage({ onNavigate }) {
     const makeChart = (id, block, unit = 'L') => {
       const target = document.getElementById(id)
       if (!target) return
-      const chart = new window.Chart(target, {
+      const chart = createChart(target, {
         type: 'line',
         data: {
           labels,
@@ -131,37 +152,20 @@ function CuvesPage({ onNavigate }) {
             borderWidth: 2,
             tension: 0.35,
             fill: true,
-            pointRadius: 4,
+            pointRadius,
             spanGaps: true,
           }],
         },
         options: baseOptions(unit),
       })
-      charts.push(chart)
+      if (chart) charts.push(chart)
     }
 
     ;(cuvesData.principal_blocks || []).forEach((block) => makeChart(`chart-cuve-principale-${block.id}`, block, 'L'))
     ;(cuvesData.journalier_blocks || []).forEach((block) => makeChart(`chart-cuve-journaliere-${block.id}`, block, 'L'))
 
     return () => charts.forEach((chart) => chart.destroy())
-  }, [chartPalette, cuvesData, startIndex, endIndex, filtering])
-
-  const applyFilters = async (event) => {
-    event.preventDefault()
-    const params = new URLSearchParams()
-    if (draftRapportDebut) params.set('rapport_debut', draftRapportDebut)
-    if (draftRapportFin) params.set('rapport_fin', draftRapportFin)
-    if (draftSiteId) params.set('site_id', draftSiteId)
-    await loadCuvesData(params.toString(), { isFilter: true })
-  }
-
-  const resetFilters = async () => {
-    setDraftSiteId('')
-    const params = new URLSearchParams()
-    if (draftRapportDebut) params.set('rapport_debut', draftRapportDebut)
-    if (draftRapportFin) params.set('rapport_fin', draftRapportFin)
-    await loadCuvesData(params.toString(), { isFilter: true })
-  }
+  }, [chartPalette, cuvesData, startIndex, endIndex])
 
   if (initialLoading || !cuvesData) {
     return (
@@ -197,10 +201,15 @@ function CuvesPage({ onNavigate }) {
           <WelcomeBanner subtitle="Toutes les cuves d’abord — affinez avec les filtres si besoin." />
 
           <AnimatedContent distance={20} duration={0.45} delay={0.05} threshold={0.01}>
-            <form className="groups-filter-bar" onSubmit={applyFilters}>
+            <form className="groups-filter-bar" onSubmit={(event) => event.preventDefault()}>
               <div className="filter-field">
                 <label htmlFor="cuves-debut">Période — début</label>
-                <select id="cuves-debut" value={draftRapportDebut} onChange={(event) => setDraftRapportDebut(event.target.value)}>
+                <select
+                  id="cuves-debut"
+                  value={rapportDebut}
+                  disabled={filtering}
+                  onChange={(event) => runFilters({ rapportDebut: event.target.value })}
+                >
                   {(cuvesData.rapport_choices || []).map((choice) => (
                     <option key={choice.id} value={choice.id}>{choice.label}</option>
                   ))}
@@ -208,7 +217,12 @@ function CuvesPage({ onNavigate }) {
               </div>
               <div className="filter-field">
                 <label htmlFor="cuves-fin">Période — fin</label>
-                <select id="cuves-fin" value={draftRapportFin} onChange={(event) => setDraftRapportFin(event.target.value)}>
+                <select
+                  id="cuves-fin"
+                  value={rapportFin}
+                  disabled={filtering}
+                  onChange={(event) => runFilters({ rapportFin: event.target.value })}
+                >
                   {(cuvesData.rapport_choices || []).map((choice) => (
                     <option key={choice.id} value={choice.id}>{choice.label}</option>
                   ))}
@@ -216,32 +230,30 @@ function CuvesPage({ onNavigate }) {
               </div>
               <div className="filter-field">
                 <label htmlFor="cuves-site">Site</label>
-                <select id="cuves-site" value={draftSiteId ?? ''} onChange={(event) => setDraftSiteId(event.target.value)}>
+                <select
+                  id="cuves-site"
+                  value={siteId ?? ''}
+                  disabled={filtering}
+                  onChange={(event) => runFilters({ siteId: event.target.value })}
+                >
                   <option value="">Tous les sites</option>
                   {(cuvesData.sites || []).map((site) => (
                     <option key={site.id} value={site.id}>{site.nom_site}</option>
                   ))}
                 </select>
               </div>
-              <div className="filter-actions">
-                <button
-                  type="submit"
-                  className={`filter-submit${(
-                    String(draftRapportDebut) !== String(rapportDebut)
-                    || String(draftRapportFin) !== String(rapportFin)
-                    || String(draftSiteId) !== String(siteId)
-                  ) ? ' is-dirty' : ''}`}
-                  disabled={filtering}
-                  aria-live="polite"
-                >
-                  {filtering ? 'Filtrage…' : 'Appliquer'}
-                </button>
-                {siteId ? (
-                  <button type="button" className="filter-reset" onClick={resetFilters} disabled={filtering}>
+              {siteId ? (
+                <div className="filter-actions">
+                  <button
+                    type="button"
+                    className="filter-reset"
+                    disabled={filtering}
+                    onClick={() => runFilters({ siteId: '' })}
+                  >
                     Tout afficher
                   </button>
-                ) : null}
-              </div>
+                </div>
+              ) : null}
             </form>
           </AnimatedContent>
 
