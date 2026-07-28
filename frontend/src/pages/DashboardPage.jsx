@@ -29,7 +29,9 @@ function normalizeAlertSeverity(alert) {
   if (
     raw === 'warning'
     || raw === 'low'
+    || raw === 'attention'
     || label.includes('faible')
+    || label.includes('attention')
   ) return SEVERITY_META.low
   return SEVERITY_META.medium
 }
@@ -37,6 +39,7 @@ function normalizeAlertSeverity(alert) {
 function DashboardPage({ onNavigate }) {
   const [dashboardData, setDashboardData] = useState(null)
   const [loadError, setLoadError] = useState('')
+  const [alertFilter, setAlertFilter] = useState('all')
 
   const formatValue = (value, suffix = '') => {
     if (value == null || Number.isNaN(value)) return '—'
@@ -161,6 +164,10 @@ function DashboardPage({ onNavigate }) {
       variance_pct: group.variance_pct != null ? Number(group.variance_pct) : 0,
       autonomy: group.autonomie_hours != null ? Number(group.autonomie_hours) : (group.autonomy != null ? Number(group.autonomy) : null),
       formatted_autonomy: group.formatted_autonomy || null,
+      is_abnormal: !!group.is_abnormal,
+      is_infinite_consumption: !!group.is_infinite_consumption,
+      has_anomaly: !!(group.has_anomaly || group.is_abnormal || group.is_infinite_consumption),
+      ecart_pct: group.ecart_pct != null ? Number(group.ecart_pct) : (group.variance_pct != null ? Number(group.variance_pct) : 0),
     }))
   }, [dashboardData])
 
@@ -198,6 +205,21 @@ function DashboardPage({ onNavigate }) {
     return null
   }
 
+  const getGroupEcartPct = (g) => {
+    // Écart de conso horaire uniquement (pas de fallback volume / « Non dispo. »)
+    if (!(g.latest_hours > 0) || !(g.latest_consumption > 0)) return null
+    if (g.latest_hourly_consumption == null || !(g.mean_hourly_consumption_deduite > 0)) return null
+    return Math.abs(
+      ((g.latest_hourly_consumption - g.mean_hourly_consumption_deduite) / g.mean_hourly_consumption_deduite) * 100,
+    )
+  }
+
+  const isConsSansDelta = (g) => g.latest_consumption > 0 && !(g.latest_hours > 0)
+  const isEcartConso = (g) => {
+    const ecart = getGroupEcartPct(g)
+    return ecart != null && ecart > 15.0
+  }
+
   const summaryCards = useMemo(() => {
     if (!dashboardData) return []
 
@@ -211,7 +233,10 @@ function DashboardPage({ onNavigate }) {
       return s.autonomie_hours != null && s.autonomie_hours < 24
     }).length
 
-    const abnormalGroups = dashboardData.summary?.abnormal_consumption_groups ?? 0
+    // Anomalies = conso sans delta ∪ écarts (même périmètre que les alertes)
+    const abnormalGroups = new Set(
+      groupRows.filter((g) => isConsSansDelta(g) || isEcartConso(g) || g.has_anomaly).map((g) => g.id),
+    ).size
     const totalConsumption = dashboardData.summary?.total_consumption ?? 0
     const previousTotalConsumption = dashboardData.summary?.previous_total_consumption ?? null
     const totalRuntime = dashboardData.summary?.total_runtime ?? 0
@@ -231,7 +256,7 @@ function DashboardPage({ onNavigate }) {
       {
         label: 'Anomalies groupes',
         title: `${abnormalGroups}`,
-        detail: 'Écart de consommation horaire détecté',
+        detail: 'Écart L/h ou conso sans delta horaire',
         hrefHint: 'Voir les groupes',
         open: () => goGroups({ mode: 'details' }),
       },
@@ -256,7 +281,7 @@ function DashboardPage({ onNavigate }) {
         },
       },
     ]
-  }, [dashboardData, groupRows, siteRows, siteAverageConsumption, onNavigate])
+  }, [dashboardData, groupRows, siteRows, onNavigate])
 
   // 1. Sites avec autonomie — tous, triés par ordre croissant (les plus urgents en premier)
   // 0h (consommation sans heures) passe en tête, ∞ (pas de données) est exclu
@@ -280,11 +305,13 @@ function DashboardPage({ onNavigate }) {
       .slice(0, 8)
   }, [siteRows])
 
-  // 2. Groupes à consommation anormale
+  // 2. Écarts de conso horaire > 15 % — hors « Non dispo. », |écart| décroissant
   const abnormalGroupRows = useMemo(() => {
     if (!groupRows.length) return []
     return [...groupRows]
-      .sort((a, b) => b.variance_pct - a.variance_pct)
+      .filter((g) => isEcartConso(g))
+      .map((g) => ({ ...g, _ecart: getGroupEcartPct(g) || 0 }))
+      .sort((a, b) => (b._ecart || 0) - (a._ecart || 0))
       .slice(0, 6)
   }, [groupRows])
 
@@ -362,27 +389,28 @@ function DashboardPage({ onNavigate }) {
         return []
       })
 
-    // --- CAS 2 : Groupes qui ont tourné à la semaine N (latest_hours > 0) mais n'ont PAS consommé (latest_consumption == 0) ---
+    // --- CAS 2 : Delta horaire sans consommation → Attention ---
     const groupWithHoursNoConsumption = groupRows
-      .filter((g) => g.latest_hours > 0 && g.latest_consumption === 0)
+      .filter((g) => g.latest_hours > 0 && !(g.latest_consumption > 0))
       .map((g) => ({
         id: `group-hours-no-cons-${g.id}`,
         type: 'anomalie',
         target: 'groups',
-        priority: 'À surveiller',
-        priority_level: 'medium',
-        severity: 'medium',
+        priority: 'Attention',
+        priority_level: 'low',
+        severity: 'low',
         group_id: g.id,
         group_label: g.label,
         site_name: g.site_name,
         title: `Groupe ${g.label} — delta horaire sans consommation (semaine N)`,
         subtitle: `Delta horaire semaine N : ${g.latest_hours.toFixed(1)} h — aucune consommation de carburant enregistrée (0 L). Vérifier la jauge et la saisie des consommations.`,
         is_infinite_consumption: false,
+        ecart_pct: 0,
       }))
 
-    // --- CAS 3 : Groupes qui ont consommé en semaine N (latest_consumption > 0) mais n'ont PAS tourné (latest_hours == 0) ---
+    // --- CAS 3 : Consommation sans fonctionnement → Urgent ---
     const groupWithConsNoHours = groupRows
-      .filter((g) => g.latest_consumption > 0 && g.latest_hours === 0)
+      .filter((g) => isConsSansDelta(g))
       .map((g) => ({
         id: `group-cons-no-hours-${g.id}`,
         type: 'anomalie',
@@ -396,40 +424,16 @@ function DashboardPage({ onNavigate }) {
         title: `Groupe ${g.label} — consommation sans fonctionnement (semaine N)`,
         subtitle: `Consommation enregistrée en semaine N : ${g.latest_consumption.toFixed(1)} L — mais aucun delta horaire (0 h). Le groupe a consommé du carburant sans tourner.`,
         is_infinite_consumption: true,
+        ecart_pct: 0,
       }))
 
-    // --- CAS 4 : Groupes ayant un écart > 15% en semaine N (avec fonctionnement et consommation non nuls en semaine N) ---
-    const SEUIL_ECART = 15.0
+    // --- CAS 4 : Écarts de conso horaire > 15% — triés par |écart| décroissant ---
     const groupWithHighVariance = groupRows
-      .filter((g) => {
-        if (g.latest_hours === 0 || g.latest_consumption === 0) return false
-
-        if (g.latest_hourly_consumption != null && g.mean_hourly_consumption_deduite > 0) {
-          const ecart = Math.abs((g.latest_hourly_consumption - g.mean_hourly_consumption_deduite) / g.mean_hourly_consumption_deduite) * 100
-          return ecart > SEUIL_ECART
-        }
-        if (g.avg_consumption > 0) {
-          const ecart = Math.abs((g.latest_consumption - g.avg_consumption) / g.avg_consumption) * 100
-          return ecart > SEUIL_ECART
-        }
-        return false
-      })
+      .filter((g) => isEcartConso(g))
       .map((g) => {
-        let titleText = ''
-        let subtitleText = ''
-        if (g.latest_hourly_consumption != null && g.mean_hourly_consumption_deduite > 0) {
-          const ecart = ((g.latest_hourly_consumption - g.mean_hourly_consumption_deduite) / g.mean_hourly_consumption_deduite) * 100
-          const sign = ecart >= 0 ? '▲' : '▼'
-          const absEcart = Math.abs(ecart).toFixed(1)
-          titleText = `Groupe ${g.label} — écart consommation horaire ${sign}${absEcart}% (semaine N)`
-          subtitleText = `Consommation horaire semaine N : ${g.latest_hourly_consumption.toFixed(2)} L/h — Moyenne habituelle : ${g.mean_hourly_consumption_deduite.toFixed(2)} L/h — Écart : ${sign}${absEcart}%.`
-        } else {
-          const ecart = ((g.latest_consumption - g.avg_consumption) / g.avg_consumption) * 100
-          const sign = ecart >= 0 ? '▲' : '▼'
-          const absEcart = Math.abs(ecart).toFixed(1)
-          titleText = `Groupe ${g.label} — écart de consommation ${sign}${absEcart}% (semaine N)`
-          subtitleText = `Consommation moyenne : ${g.avg_consumption.toFixed(1)} L — Consommation semaine N : ${g.latest_consumption.toFixed(1)} L — Écart : ${sign}${absEcart}%.`
-        }
+        const signedEcart = ((g.latest_hourly_consumption - g.mean_hourly_consumption_deduite) / g.mean_hourly_consumption_deduite) * 100
+        const sign = signedEcart >= 0 ? '▲' : '▼'
+        const absEcart = Math.abs(signedEcart).toFixed(1)
         return {
           id: `group-variance-${g.id}`,
           type: 'ecart',
@@ -440,11 +444,13 @@ function DashboardPage({ onNavigate }) {
           group_id: g.id,
           group_label: g.label,
           site_name: g.site_name,
-          title: titleText,
-          subtitle: subtitleText,
+          title: `Groupe ${g.label} — écart consommation horaire ${sign}${absEcart}% (semaine N)`,
+          subtitle: `Consommation horaire semaine N : ${g.latest_hourly_consumption.toFixed(2)} L/h — Moyenne habituelle : ${g.mean_hourly_consumption_deduite.toFixed(2)} L/h — Écart : ${sign}${absEcart}%.`,
           is_infinite_consumption: false,
+          ecart_pct: Math.abs(signedEcart),
         }
       })
+      .sort((a, b) => (b.ecart_pct || 0) - (a.ecart_pct || 0))
 
     // Éliminer d'éventuels doublons par ID
     const alertMap = new Map()
@@ -456,7 +462,10 @@ function DashboardPage({ onNavigate }) {
 
     return combined.sort((a, b) => {
       const rank = { critical: 3, medium: 2, low: 1 }
-      return (rank[b.severity] || 0) - (rank[a.severity] || 0)
+      const bySeverity = (rank[b.severity] || 0) - (rank[a.severity] || 0)
+      if (bySeverity !== 0) return bySeverity
+      // À sévérité égale : écarts du plus grand au plus petit
+      return (b.ecart_pct || 0) - (a.ecart_pct || 0)
     })
   }, [siteRows, groupRows, dashboardData])
 
@@ -466,6 +475,11 @@ function DashboardPage({ onNavigate }) {
     medium: alerts.filter((a) => a.severity === 'medium').length,
     low: alerts.filter((a) => a.severity === 'low').length,
   }), [alerts])
+
+  const visibleAlerts = useMemo(() => {
+    if (alertFilter === 'all') return alerts
+    return alerts.filter((a) => a.severity === alertFilter)
+  }, [alerts, alertFilter])
 
   const renderAlertSubtitle = (subtitle) => {
     if (!subtitle) return null
@@ -643,19 +657,17 @@ function DashboardPage({ onNavigate }) {
                       </strong>
                     </td>
                     <td style={{ textAlign: 'right' }}>
-                      {row.latest_hourly_consumption == null
-                        ? <span title="Consommation sans delta horaire">Non dispo.</span>
-                        : formatValue(row.latest_hourly_consumption, ' L/h')}
+                      {formatValue(row.latest_hourly_consumption, ' L/h')}
                     </td>
                     <td style={{ textAlign: 'center' }}>
-                      {renderDeviation(row.mean_hourly_consumption_deduite, row.latest_hourly_consumption, '—')}
+                      {renderDeviation(row.latest_hourly_consumption, row.mean_hourly_consumption_deduite, '—')}
                     </td>
                   </tr>
                 ))}
                 {abnormalGroupRows.length === 0 && (
                   <tr>
                     <td colSpan="5" className="empty-state-cell">
-                      Aucune anomalie détectée
+                      Aucun écart horaire au-dessus du seuil
                     </td>
                   </tr>
                 )}
@@ -786,21 +798,48 @@ function DashboardPage({ onNavigate }) {
               </h3>
             </div>
             {alerts.length > 0 && (
-              <div className="alert-legend" aria-label="Niveaux d’alerte">
-                <span className="alert-legend-item alert-legend--critical">
+              <div className="alert-legend" role="tablist" aria-label="Filtrer les alertes">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={alertFilter === 'all'}
+                  className={`alert-legend-item alert-legend--all${alertFilter === 'all' ? ' is-active' : ''}`}
+                  onClick={() => setAlertFilter('all')}
+                >
+                  Tous <strong>{alerts.length}</strong>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={alertFilter === 'critical'}
+                  className={`alert-legend-item alert-legend--critical${alertFilter === 'critical' ? ' is-active' : ''}`}
+                  onClick={() => setAlertFilter('critical')}
+                >
                   Urgent <strong>{alertCounts.critical}</strong>
-                </span>
-                <span className="alert-legend-item alert-legend--medium">
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={alertFilter === 'medium'}
+                  className={`alert-legend-item alert-legend--medium${alertFilter === 'medium' ? ' is-active' : ''}`}
+                  onClick={() => setAlertFilter('medium')}
+                >
                   À surveiller <strong>{alertCounts.medium}</strong>
-                </span>
-                <span className="alert-legend-item alert-legend--low">
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={alertFilter === 'low'}
+                  className={`alert-legend-item alert-legend--low${alertFilter === 'low' ? ' is-active' : ''}`}
+                  onClick={() => setAlertFilter('low')}
+                >
                   Attention <strong>{alertCounts.low}</strong>
-                </span>
+                </button>
               </div>
             )}
           </div>
           <div className="alert-list">
-            {alerts.length ? alerts.map((alert) => {
+            {visibleAlerts.length ? visibleAlerts.map((alert) => {
               const severity = alert.severity || normalizeAlertSeverity(alert).level
               const label = alert.priority || SEVERITY_META[severity]?.label || 'Moyen'
               const openAlert = () => {
@@ -847,7 +886,11 @@ function DashboardPage({ onNavigate }) {
                 </button>
               )
             }) : (
-              <div className="alert-empty">Aucune alerte majeure détectée pour le moment.</div>
+              <div className="alert-empty">
+                {alerts.length
+                  ? 'Aucune alerte pour ce niveau.'
+                  : 'Aucune alerte majeure détectée pour le moment.'}
+              </div>
             )}
           </div>
         </section>

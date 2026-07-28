@@ -169,30 +169,42 @@ def calculer_groupes(
     groupes_by_id,
     group_primary_site_ids,
     selected_site_id=None,
+    groups_linked_by_site=None,
 ):
     """
-    Calcule les données complètes pour chaque groupe électrogène.
+    Calcule les données complètes pour chaque groupe avec partage de la
+    consommation au prorata de la puissance.
 
-    C'est la fonction de calcul la plus complexe de l'application. Elle détermine
-    la part de consommation de chaque groupe en se basant sur la consommation
-    totale de son site, distribuée au prorata de la puissance des groupes actifs
-    pendant la période.
-
-    Args:
-        reports (list): Liste des objets Rapport.
-        groupes (list): Liste des objets GroupeElectrogene.
-        sites (list): Liste des objets CuvePrincipale (sites).
-        lines_by_group_report (dict): Lignes indexées par (groupe_id, rapport_id).
-        site_report_state (dict): État pré-calculé des sites par (site_id, rapport_id).
-        groups_by_site_report (dict): IDs des groupes actifs par (site_id, rapport_id).
-        groupes_by_id (dict): Groupes indexés par leur ID.
-        group_primary_site_ids (dict): Site principal de chaque groupe.
-        selected_site_id (int, optional): ID du site pour filtrer les résultats.
-
-    Returns:
-        list[dict]: Une liste de "blocs", chaque bloc contenant toutes les données
-                    calculées pour un groupe (séries temporelles, moyennes, autonomie, etc.).
+    Autonomie (à l’instant T) :
+      1. proportion = P_groupe / Σ P_groupes liés à la même cuve principale
+      2. volume_proportionnel = (volume_CP × proportion) + volume_CJ_du_groupe
+      3. autonomie_h = volume_proportionnel / conso_horaire_moyenne
+         (moyenne des L/h significatifs, hors 0 et ∞)
     """
+    # Groupes durablement rattachés à chaque site (via cuves journalières),
+    # pour la proportion d’autonomie — pas seulement ceux présents sur un rapport.
+    if groups_linked_by_site is None:
+        from dashboard.models import CuveJournaliere
+
+        groups_linked_by_site = {}
+        for cj in CuveJournaliere.objects.filter(
+            cuve_principale_id__isnull=False,
+            groupe_electrogene_id__isnull=False,
+        ).only('cuve_principale_id', 'groupe_electrogene_id'):
+            g = groupes_by_id.get(cj.groupe_electrogene_id)
+            if g is not None:
+                groups_linked_by_site.setdefault(cj.cuve_principale_id, [])
+                if g not in groups_linked_by_site[cj.cuve_principale_id]:
+                    groups_linked_by_site[cj.cuve_principale_id].append(g)
+
+        # Fallback : sites sans CJ → groupes déjà connus via primary_site
+        for groupe in groupes:
+            site_id = group_primary_site_ids.get(groupe.id)
+            if site_id is not None:
+                bucket = groups_linked_by_site.setdefault(site_id, [])
+                if groupe not in bucket:
+                    bucket.append(groupe)
+
     group_blocks = []
     for groupe in groupes:
         primary_site_id = group_primary_site_ids.get(groupe.id)
@@ -201,11 +213,22 @@ def calculer_groupes(
 
         hours_run = []
         volume = []
-        weighted_volumes = []
         consumed_deltas = []
         previous_counter = None
-        previous_volume = None
         group_share = 1.0
+
+        # Proportion stable (tous les groupes liés à la CP)
+        linked_groups = list(groups_linked_by_site.get(primary_site_id, [])) if primary_site_id else [groupe]
+        if groupe not in linked_groups:
+            linked_groups = list(linked_groups) + [groupe]
+        total_linked_power = sum(extraire_puissance(g.puissance) for g in linked_groups)
+        group_power = extraire_puissance(groupe.puissance)
+        if total_linked_power > 0:
+            power_share = group_power / total_linked_power
+        elif linked_groups:
+            power_share = 1.0 / len(linked_groups)
+        else:
+            power_share = 1.0
 
         for report in reports:
             # 1. Calculer les heures de fonctionnement (delta du compteur)
@@ -234,27 +257,29 @@ def calculer_groupes(
             site_state = site_report_state.get((primary_site_id, report.id), {}) if primary_site_id is not None else {}
             site_delta = float(site_state.get('delta', 0.0) or 0.0)
 
-            # Détermine la puissance totale des groupes actifs sur le site pour ce rapport
-            active_group_ids = groups_by_site_report.get((primary_site_id, report.id), set()) if primary_site_id is not None else set()
+            site_current_volume = float(site_state.get('current_volume') or 0.0)
+
+            # Conso période : partage au prorata des groupes ACTIFS sur ce rapport
+            active_group_ids = (
+                groups_by_site_report.get((primary_site_id, report.id), set())
+                if primary_site_id is not None
+                else set()
+            )
             report_groups = [groupes_by_id[gid] for gid in active_group_ids if gid in groupes_by_id]
-            total_power = sum(extraire_puissance(g.puissance) for g in report_groups)
-
-            # Calcule la part de ce groupe (prorata de la puissance)
-            if total_power > 0:
-                group_share = extraire_puissance(groupe.puissance) / total_power
+            total_power_report = sum(extraire_puissance(g.puissance) for g in report_groups)
+            
+            period_share = 1.0
+            if total_power_report > 0:
+                period_share = extraire_puissance(groupe.puissance) / total_power_report
             elif report_groups:
-                group_share = 1.0 / len(report_groups)
-            else:
-                group_share = 1.0
+                period_share = 1.0 / len(report_groups)
 
-            # Applique cette part à la consommation totale du site
-            weighted_report_delta = round(site_delta * group_share, 1)
-            consumed_deltas.append(weighted_report_delta)
+            # Volume courbe / autonomie : proportion stable × volume CP réel
+            weighted_report_volume = round(site_current_volume * power_share, 1)
+            weighted_report_delta = round(site_delta * period_share, 1)
 
-            # Calcule le volume restant pour ce groupe (part du volume total du site actuel)
-            site_current_volume = float(site_state.get('current_volume', 0.0) or 0.0)
-            weighted_report_volume = round(site_current_volume * group_share, 1)
             volume.append(weighted_report_volume)
+            consumed_deltas.append(weighted_report_delta)
 
 
         # 3. Calculer les métriques finales (consommation horaire, autonomie)
@@ -265,16 +290,8 @@ def calculer_groupes(
         # Consommation horaire moyenne (ratio des totaux), utilisée pour le calcul fiable de l'autonomie.
         if total_hours > 0:
             mean_hourly_consumption = total_consumed / total_hours
-            is_infinite_consumption = False
-            is_infinite_autonomy = (mean_hourly_consumption == 0.0)
-        elif has_infinite_cons:
-            mean_hourly_consumption = 0.0
-            is_infinite_consumption = True
-            is_infinite_autonomy = False
         else:
             mean_hourly_consumption = 0.0
-            is_infinite_consumption = False
-            is_infinite_autonomy = True
 
         # Consommation horaire déduite (moyenne des ratios), pour l'affichage et la détection d'anomalies.
         per_period_rates = []
@@ -292,22 +309,6 @@ def calculer_groupes(
         if hours_run and hours_run[-1] > 0 and consumed_deltas and consumed_deltas[-1] > 0:
             latest_hourly_consumption = consumed_deltas[-1] / hours_run[-1]
 
-        # Calcul final de l'autonomie en heures.
-        autonomy_hours = None
-        formatted_autonomy = None
-
-        if is_infinite_consumption:
-            autonomy_hours = 0.0
-            formatted_autonomy = "0h"
-        elif is_infinite_autonomy:
-            autonomy_hours = None
-            formatted_autonomy = "∞"
-        elif mean_hourly_consumption > 0:
-            latest_group_volume = volume[-1] if volume else 0.0
-            autonomy_hours = latest_group_volume / mean_hourly_consumption
-            formatted_autonomy = formater_autonomie(autonomy_hours)
-
-        # 4. Assembler le bloc de données pour ce groupe
         last_report = reports[-1] if reports else None
         latest_main_volume = None
         latest_daily_volume = None
@@ -315,18 +316,47 @@ def calculer_groupes(
             last_lines = lines_by_group_report.get((groupe.id, last_report.id), [])
             last_lines = [l for l in last_lines if l.cuve_principale_id == primary_site_id]
             if last_lines:
-                latest_main_volume = round(
-                    sum(float(l.quantite_gasoil_cuve_principale or 0.0) for l in last_lines), 1
-                )
-                latest_daily_volume = round(
-                    sum(float(l.quantite_gasoil_cuve_journaliere or 0.0) for l in last_lines), 1
-                )
+                cp_vals = [
+                    float(l.quantite_gasoil_cuve_principale)
+                    for l in last_lines
+                    if l.quantite_gasoil_cuve_principale is not None
+                ]
+                cj_vals = [
+                    float(l.quantite_gasoil_cuve_journaliere or 0.0)
+                    for l in last_lines
+                ]
+                latest_main_volume = round(max(cp_vals), 1) if cp_vals else None
+                latest_daily_volume = round(sum(cj_vals), 1) if cj_vals else None
+
+        # Autonomie = (volume_CP × proportion + CJ groupe) / conso_horaire_moyenne
+        volume_proportionnel = None
+        if latest_main_volume is not None:
+            cj_part = float(latest_daily_volume or 0.0)
+            volume_proportionnel = round(latest_main_volume * power_share + cj_part, 1)
+        autonomy_hours = None
+        formatted_autonomy = None
+
+        # Anomalie « conso sans delta horaire » : indépendante du calcul d’autonomie
+        is_infinite_consumption = bool(has_infinite_cons)
+
+        if mean_hourly_consumption_deduite > 0 and volume_proportionnel is not None:
+            is_infinite_autonomy = False
+            autonomy_hours = volume_proportionnel / mean_hourly_consumption_deduite
+            formatted_autonomy = formater_autonomie(autonomy_hours)
+        else:
+            # Pas de conso horaire moyenne significative (« - ») → autonomie indéterminée
+            is_infinite_autonomy = True
+            autonomy_hours = None
+            formatted_autonomy = "∞"
 
         group_blocks.append({
             'id': groupe.id,
-            'label': f"G#{groupe.id} ({groupe.marque} {groupe.puissance})",
+            'label': groupe.identifiant,
             'site_id': primary_site_id,
             'site_nom': next((site.identifiant for site in sites if site.id == primary_site_id), ''),
+            'puissance': groupe.puissance,
+            'power_share': round(power_share, 4),
+            'volume_proportionnel': volume_proportionnel,
             'hours_run': hours_run,
             'volume': volume,
             'consumption': consumed_deltas,

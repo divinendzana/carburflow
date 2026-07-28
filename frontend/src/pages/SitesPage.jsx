@@ -6,6 +6,7 @@ import AutonomyBadge from '../components/AutonomyBadge.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import PageEnter from '../components/PageEnter.jsx'
 import { useChartPalette } from '../hooks/useChartPalette.js'
+import { createChart, seriesPointRadius, xAxisTicks } from '../utils/chartAxis.js'
 import { formatAutonomyValue, getAutonomySeverity } from '../utils/format.js'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
@@ -16,9 +17,6 @@ function SitesPage({ onNavigate }) {
   const [startIdx, setStartIdx] = useState(0)
   const [endIdx, setEndIdx] = useState(0)
   const [siteId, setSiteId] = useState('')
-  const [draftStartIdx, setDraftStartIdx] = useState(0)
-  const [draftEndIdx, setDraftEndIdx] = useState(0)
-  const [draftSiteId, setDraftSiteId] = useState('')
   const querySiteId = useMemo(() => new URLSearchParams(window.location.search).get('siteId'), [])
   const querySiteName = useMemo(() => new URLSearchParams(window.location.search).get('siteName'), [])
   const queryMode = useMemo(() => new URLSearchParams(window.location.search).get('mode'), [])
@@ -27,8 +25,6 @@ function SitesPage({ onNavigate }) {
   // (querySiteId présent, ex. depuis une alerte du Dashboard), on garde le
   // comportement existant : vue détail sur ce site.
   const [mode, setMode] = useState(queryMode || (querySiteId ? 'details' : 'all'))
-  const [draftMode, setDraftMode] = useState(queryMode || (querySiteId ? 'details' : 'all'))
-  const [filtering, setFiltering] = useState(false)
 
   const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value)
 
@@ -158,9 +154,7 @@ function SitesPage({ onNavigate }) {
     if (querySiteId && sitesDashboard) {
       const matchingSite = siteOptions.find((site) => String(site.id) === querySiteId || site.nom_site === querySiteName)
       if (matchingSite) {
-        const id = String(matchingSite.id)
-        setSiteId(id)
-        setDraftSiteId(id)
+        setSiteId(String(matchingSite.id))
       }
     }
 
@@ -168,21 +162,8 @@ function SitesPage({ onNavigate }) {
       const last = sitesDashboard.labels.length - 1
       setStartIdx(0)
       setEndIdx(last)
-      setDraftStartIdx(0)
-      setDraftEndIdx(last)
     }
   }, [sitesDashboard, querySiteId, querySiteName, siteOptions])
-
-  const applyFilters = async (event) => {
-    event.preventDefault()
-    setFiltering(true)
-    await new Promise((resolve) => setTimeout(resolve, 320))
-    setStartIdx(draftStartIdx)
-    setEndIdx(draftEndIdx)
-    setSiteId(draftSiteId)
-    setMode(draftMode)
-    setFiltering(false)
-  }
 
   const selectedSite = useMemo(() => {
     if (!sitesDashboard || mode === 'all' || !siteId) return null
@@ -302,10 +283,11 @@ function SitesPage({ onNavigate }) {
     const charts = []
     const labels = (sitesDashboard.labels || []).slice(startIdx, endIdx + 1)
     const sliceSeries = (values = []) => values.slice(startIdx, endIdx + 1)
+    const pointRadius = seriesPointRadius(labels.length)
     const createLineChart = (id, data, color, fill = false) => {
       const ctx = document.getElementById(id)
       if (!ctx) return
-      const chart = new Chart(ctx, {
+      const chart = createChart(ctx, {
         type: 'line',
         data: {
           labels,
@@ -317,7 +299,7 @@ function SitesPage({ onNavigate }) {
             borderWidth: 3,
             tension: 0.35,
             fill,
-            pointRadius: 4,
+            pointRadius,
             spanGaps: true,
           }],
         },
@@ -326,10 +308,19 @@ function SitesPage({ onNavigate }) {
           maintainAspectRatio: false,
           spanGaps: true,
           plugins: { legend: { display: false } },
-          scales: { x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } }, y: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } } },
+          scales: {
+            x: {
+              ticks: xAxisTicks(labels.length, chartPalette.text),
+              grid: { color: chartPalette.grid },
+            },
+            y: {
+              ticks: { color: chartPalette.text },
+              grid: { color: chartPalette.grid },
+            },
+          },
         },
       })
-      charts.push(chart)
+      if (chart) charts.push(chart)
     }
 >>>>>>> d2b7279f27938bd4c7bf270e0c7bd8e4f533c608
 
@@ -358,56 +349,35 @@ function SitesPage({ onNavigate }) {
     <div className="app-shell dashboard-shell">
       <Topbar activeView="sites" onNavigate={onNavigate} />
 
-      {filtering && (
-        <div className="cf-filter-overlay" role="status" aria-live="polite">
-          <PageLoader fullscreen={false} label="Application du filtre…" />
-        </div>
-      )}
-
       <PageEnter>
-      <main className={`groups-grid ${filtering ? 'is-filtering' : ''}`}>
+      <main className="groups-grid">
         <WelcomeBanner subtitle="Tous les sites d’abord — affinez avec les filtres si besoin." />
-        <form className="groups-filter-bar" onSubmit={applyFilters}>
+        <form className="groups-filter-bar" onSubmit={(event) => event.preventDefault()}>
           <div className="filter-field">
             <label htmlFor="site-start">Période — début</label>
-            <select id="site-start" value={String(draftStartIdx)} onChange={(event) => setDraftStartIdx(Number(event.target.value))}>
+            <select id="site-start" value={String(startIdx)} onChange={(event) => setStartIdx(Number(event.target.value))}>
               {(sitesDashboard?.labels || []).map((label, index) => (<option key={`${label}-${index}`} value={String(index)}>{label}</option>))}
             </select>
           </div>
           <div className="filter-field">
             <label htmlFor="site-end">Période — fin</label>
-            <select id="site-end" value={String(draftEndIdx)} onChange={(event) => setDraftEndIdx(Number(event.target.value))}>
+            <select id="site-end" value={String(endIdx)} onChange={(event) => setEndIdx(Number(event.target.value))}>
               {(sitesDashboard?.labels || []).map((label, index) => (<option key={`${label}-${index}`} value={String(index)}>{label}</option>))}
             </select>
           </div>
           <div className="filter-field">
             <label htmlFor="site-select">Site</label>
-            <select id="site-select" value={draftSiteId ?? ''} onChange={(event) => setDraftSiteId(event.target.value)}>
+            <select id="site-select" value={siteId ?? ''} onChange={(event) => setSiteId(event.target.value)}>
               <option value="">Tous les sites</option>
               {siteOptions.map((site) => (<option key={site.id} value={site.id}>{site.nom_site}</option>))}
             </select>
           </div>
           <div className="filter-field">
             <label htmlFor="view_mode">Affichage</label>
-            <select id="view_mode" value={draftMode} onChange={(event) => setDraftMode(event.target.value)}>
+            <select id="view_mode" value={mode} onChange={(event) => setMode(event.target.value)}>
               <option value="all">Vue d’ensemble</option>
               <option value="details">Détail</option>
             </select>
-          </div>
-          <div className="filter-actions">
-            <button
-              type="submit"
-              className={`filter-submit${(
-                Number(draftStartIdx) !== Number(startIdx)
-                || Number(draftEndIdx) !== Number(endIdx)
-                || String(draftSiteId) !== String(siteId)
-                || String(draftMode) !== String(mode)
-              ) ? ' is-dirty' : ''}`}
-              disabled={filtering}
-              aria-live="polite"
-            >
-              {filtering ? 'Filtrage…' : 'Appliquer'}
-            </button>
           </div>
         </form>
 

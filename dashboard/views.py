@@ -77,14 +77,19 @@ class SitesVolumeAPIView(APIView):
         for idx, cuve in enumerate(cuves):
             data = []
             for report in reports:
-                lignes = LigneRapport.objects.filter(rapport=report)
-                total = 0.0
-                for line in lignes:
-                    if line.cuve_principale_id == cuve.id:
-                        total += float(line.quantite_gasoil_cuve_principale or 0.0)
-                    if line.cuve_journaliere_id and line.cuve_journaliere and line.cuve_journaliere.cuve_principale_id == cuve.id:
-                        total += float(line.quantite_gasoil_cuve_journaliere or 0.0)
-                data.append(round(total, 1))
+                lignes = [
+                    line for line in LigneRapport.objects.filter(rapport=report).select_related('cuve_journaliere')
+                    if line.cuve_principale_id == cuve.id
+                    or (
+                        line.cuve_journaliere_id
+                        and line.cuve_journaliere
+                        and line.cuve_journaliere.cuve_principale_id == cuve.id
+                    )
+                ]
+                if not lignes:
+                    data.append(None)
+                else:
+                    data.append(round(calc._site_volume_from_lines(lignes), 1))
             site_series.append({
                 'id': cuve.id,
                 'nom_site': cuve.identifiant,
@@ -137,7 +142,7 @@ class SitesDureeAPIView(APIView):
                     values.append(round(delta, 1))
 
                 site_datasets.append({
-                    'label': f"G#{groupe.id} ({groupe.marque} {groupe.puissance})",
+                    'label': groupe.identifiant,
                     'data': values,
                     'borderColor': group_colors[group_idx % len(group_colors)],
                     'backgroundColor': f"{group_colors[group_idx % len(group_colors)]}20",
@@ -171,18 +176,21 @@ class SitesConsommationAPIView(APIView):
             data = []
             previous_volume = None
             for report in reports:
-                lignes = LigneRapport.objects.filter(rapport=report)
-                current_volume = 0.0
-                depotage_total = 0.0
+                lignes = [
+                    line for line in LigneRapport.objects.filter(rapport=report).select_related('cuve_journaliere')
+                    if line.cuve_principale_id == cuve.id
+                    or (
+                        line.cuve_journaliere_id
+                        and line.cuve_journaliere
+                        and line.cuve_journaliere.cuve_principale_id == cuve.id
+                    )
+                ]
+                if not lignes:
+                    data.append(None)
+                    continue
 
-                for line in lignes:
-                    if line.cuve_principale_id == cuve.id:
-                        current_volume += float(line.quantite_gasoil_cuve_principale or 0.0)
-                    if line.cuve_journaliere_id and line.cuve_journaliere and line.cuve_journaliere.cuve_principale_id == cuve.id:
-                        current_volume += float(line.quantite_gasoil_cuve_journaliere or 0.0)
-
-                    if line.cuve_principale_id == cuve.id or (line.cuve_journaliere_id and line.cuve_journaliere and line.cuve_journaliere.cuve_principale_id == cuve.id):
-                        depotage_total += float(line.depotage or 0.0)
+                current_volume = calc._site_volume_from_lines(lignes)
+                depotage_total = calc._site_depotage_from_lines(lignes)
 
                 if previous_volume is None:
                     value = 0.0
@@ -399,14 +407,27 @@ class DashboardOverviewAPIView(APIView):
         numeric = [float(v) for v in values if v is not None]
         return float(statistics.fmean(numeric)) if numeric else 0.0
 
+    def _mean_positive(self, values):
+        """Moyenne alignée sur la page Groupes : ignore None et les 0."""
+        numeric = [float(v) for v in values if v is not None and float(v) > 0]
+        return float(statistics.fmean(numeric)) if numeric else 0.0
+
     def _last_numeric(self, values, default=0.0):
         for value in reversed(values or []):
             if value is not None:
                 return round(float(value), 1)
         return default
 
-    def _numeric_values(self, values):
-        return [float(v) for v in values if v is not None]
+    def _numeric_values(self, values, *, positive_only=False):
+        out = []
+        for v in values or []:
+            if v is None:
+                continue
+            num = float(v)
+            if positive_only and num <= 0:
+                continue
+            out.append(num)
+        return out
 
     def get(self, request):
 <<<<<<< HEAD
@@ -459,8 +480,8 @@ class DashboardOverviewAPIView(APIView):
                 reports, lines_by_site_report, site.id
             )
 
-            meaningful_consumption = consumption_series[1:] if len(consumption_series) > 1 else consumption_series
-            avg_consumption = round(self._mean(meaningful_consumption), 1)
+            # Moyenne = périodes avec conso > 0 uniquement (comme page Groupes)
+            avg_consumption = round(self._mean_positive(consumption_series), 1)
             latest_consumption = self._last_numeric(consumption_series)
             latest_volume = self._last_numeric(volume_series)
 
@@ -522,26 +543,35 @@ class DashboardOverviewAPIView(APIView):
         for block in group_blocks:
             hours_series = block['hours_run']
             consumption_series = block['consumption']
-            meaningful_consumption = consumption_series[1:] if len(consumption_series) > 1 else consumption_series
-            meaningful_hours = hours_series[1:] if len(hours_series) > 1 else hours_series
-            numeric_consumption = self._numeric_values(meaningful_consumption)
+            # Moyennes significatives (> 0), alignées sur les métriques Groupes
+            avg_consumption = round(self._mean_positive(consumption_series), 1)
+            # Semaine N = dernière période du rapport (None → 0), pas le dernier numérique non-null
+            latest_consumption = round(float(consumption_series[-1]), 1) if consumption_series and consumption_series[-1] is not None else 0.0
+            avg_hours = round(self._mean_positive(hours_series), 1)
+            latest_hours = round(float(hours_series[-1]), 1) if hours_series and hours_series[-1] is not None else 0.0
 
-            avg_consumption = round(self._mean(meaningful_consumption), 1)
-            latest_consumption = self._last_numeric(consumption_series)
-            avg_hours = round(self._mean(meaningful_hours), 1)
-            latest_hours = self._last_numeric(hours_series)
-
+            numeric_consumption = self._numeric_values(consumption_series, positive_only=True)
             variance_pct = 0.0
             if avg_consumption > 0 and len(numeric_consumption) > 1:
                 variance_pct = round((statistics.pstdev(numeric_consumption) / avg_consumption) * 100, 1)
 
-            is_abnormal = (
-                avg_consumption > 0
-                and block.get('mean_hourly_consumption_deduite', 0) > 0
-                and block.get('mean_hourly_consumption', 0) > 0
-                and block.get('mean_hourly_consumption_deduite', 0) > block.get('mean_hourly_consumption', 0) * 1.2
-                and variance_pct > 15.0
-            )
+            # Écart semaine N = conso horaire uniquement (pas de fallback volume)
+            ecart_pct = 0.0
+            latest_hourly = block.get('latest_hourly_consumption')
+            mean_deduite = float(block.get('mean_hourly_consumption_deduite') or 0.0)
+            if (
+                latest_hours > 0
+                and latest_consumption > 0
+                and latest_hourly is not None
+                and mean_deduite > 0
+            ):
+                ecart_pct = abs((float(latest_hourly) - mean_deduite) / mean_deduite) * 100
+
+            is_abnormal = ecart_pct > self.ABNORMAL_VARIANCE_THRESHOLD
+            # Semaine N : conso > 0 et pas de delta horaire (0 ou absent)
+            cons_sans_delta_n = latest_consumption > 0 and not (latest_hours > 0)
+            cons_sans_delta = cons_sans_delta_n or bool(block.get('is_infinite_consumption'))
+            has_anomaly = bool(is_abnormal or cons_sans_delta)
 
             group_rows.append({
                 'id': block['id'],
@@ -552,17 +582,19 @@ class DashboardOverviewAPIView(APIView):
                 'latest_consumption': latest_consumption,
                 'avg_hours': avg_hours,
                 'latest_hours': latest_hours,
-                'variance_pct': variance_pct,
+                'variance_pct': round(max(variance_pct, ecart_pct), 1),
+                'ecart_pct': round(ecart_pct, 1),
                 'autonomy': block['autonomie_hours'],
                 'autonomie_hours': block['autonomie_hours'],
                 'formatted_autonomy': block['formatted_autonomy'],
-                'is_infinite_consumption': block['is_infinite_consumption'],
+                'is_infinite_consumption': bool(block.get('is_infinite_consumption') or cons_sans_delta),
                 'is_infinite_autonomy': block['is_infinite_autonomy'],
                 'latest_main_volume': block['latest_main_volume'],
                 'mean_hourly_consumption': block['mean_hourly_consumption'],
                 'mean_hourly_consumption_deduite': block['mean_hourly_consumption_deduite'],
                 'latest_hourly_consumption': block['latest_hourly_consumption'],
                 'is_abnormal': is_abnormal,
+                'has_anomaly': has_anomaly,
             })
 
         # --- 5. Calcul de l'autonomie par site ---
@@ -626,29 +658,37 @@ class DashboardOverviewAPIView(APIView):
                 })
 
         for group in group_rows:
-            if group['is_abnormal']:
-                variance = group['variance_pct']
-                sign = "▲" if variance >= 0 else "▼"
-                alerts.append({
-                    'id': f"group-{group['id']}",
-                    'type': 'group_variance',
-                    'target': 'groups',
-                    'priority': 'Moyenne',
-                    'priority_level': 'warning',
-                    'group_id': group['id'],
-                    'group_label': group['label'],
-                    'site_name': group['site_name'],
-                    'title': f"Groupe {group['label']} : écart de consommation horaire",
-                    'subtitle': (
-                        f"Écart de {sign}{abs(variance):.1f}% entre la consommation horaire moyenne "
-                        f"({group['mean_hourly_consumption_deduite']:.2f} L/h) et la consommation horaire semaine N "
-                        f"({(group['latest_hourly_consumption'] if group['latest_hourly_consumption'] is not None else group['mean_hourly_consumption']):.2f} L/h). "
-                        f"Consommation moyenne du groupe : {group['avg_consumption']:.1f} L."
-                    ),
-                })
+            if not group['is_abnormal']:
+                continue
+            variance = group.get('ecart_pct') or group['variance_pct']
+            sign = "▲" if (
+                (group.get('latest_hourly_consumption') or 0)
+                >= (group.get('mean_hourly_consumption_deduite') or 0)
+            ) else "▼"
+            alerts.append({
+                'id': f"group-{group['id']}",
+                'type': 'group_variance',
+                'target': 'groups',
+                'priority': 'Moyenne',
+                'priority_level': 'warning',
+                'group_id': group['id'],
+                'group_label': group['label'],
+                'site_name': group['site_name'],
+                'ecart_pct': variance,
+                'title': f"Groupe {group['label']} : écart de consommation horaire",
+                'subtitle': (
+                    f"Écart de {sign}{abs(variance):.1f}% entre la consommation horaire moyenne "
+                    f"({group['mean_hourly_consumption_deduite']:.2f} L/h) et la consommation horaire semaine N "
+                    f"({(group['latest_hourly_consumption'] if group['latest_hourly_consumption'] is not None else group['mean_hourly_consumption']):.2f} L/h). "
+                    f"Consommation moyenne du groupe : {group['avg_consumption']:.1f} L."
+                ),
+            })
 
         priority_order = {'urgent': 0, 'warning': 1}
-        alerts.sort(key=lambda item: priority_order.get(item['priority_level'], 99))
+        alerts.sort(key=lambda item: (
+            priority_order.get(item['priority_level'], 99),
+            -(item.get('ecart_pct') or 0),
+        ))
 
 <<<<<<< HEAD
         # --- 7. Calcul des KPIs de résumé ---
@@ -687,7 +727,9 @@ class DashboardOverviewAPIView(APIView):
             'reports': [{'id': r.id, 'label': self._report_label(r)} for r in reports],
             'summary': {
                 'critical_autonomy_sites': sum(1 for s in site_rows if _site_is_critical(s)),
-                'abnormal_consumption_groups': sum(1 for g in group_rows if g['is_abnormal']),
+                'abnormal_consumption_groups': sum(
+                    1 for g in group_rows if g.get('has_anomaly') or g.get('is_abnormal') or g.get('is_infinite_consumption')
+                ),
                 'total_consumption': round(sum(s['latest_consumption'] for s in site_rows), 1),
                 'previous_total_consumption': prev_consumption,
                 'total_runtime': round(sum(g['latest_hours'] for g in group_rows), 1),

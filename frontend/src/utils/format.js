@@ -23,8 +23,9 @@ export function formatAutonomy(hours) {
  * - unknown  : pas assez de données
  */
 export function getAutonomySeverity(entity = {}) {
-  if (entity.is_infinite_consumption) return 'critical'
+  // Pas de conso horaire moyenne → indéterminée (prioritaire sur le cas 0 h)
   if (entity.is_infinite_autonomy || entity.formatted_autonomy === '∞') return 'unknown'
+  if (entity.is_infinite_consumption) return 'critical'
   const hrs = entity.autonomie_hours
   if (hrs == null || Number.isNaN(Number(hrs))) return 'unknown'
   if (hrs < 24) return 'critical'
@@ -47,8 +48,8 @@ export function getAutonomySeverityLabel(severity) {
  * Jamais "∞" : le client doit comprendre tout de suite.
  */
 export function formatAutonomyValue(entity = {}) {
-  if (entity.is_infinite_consumption) return '0 h'
   if (entity.is_infinite_autonomy || entity.formatted_autonomy === '∞') return 'Indét.'
+  if (entity.is_infinite_consumption) return '0 h'
   if (entity.formatted_autonomy && entity.formatted_autonomy !== '∞') {
     return String(entity.formatted_autonomy)
       .replace(/(\d+)j(\d+)h/, '$1 j $2 h')
@@ -63,11 +64,11 @@ export function formatAutonomyValue(entity = {}) {
  * Phrase d’aide au survol / accessibilité.
  */
 export function getAutonomyHint(entity = {}) {
+  if (entity.is_infinite_autonomy || entity.formatted_autonomy === '∞') {
+    return 'Pas assez de données (conso horaire moyenne indisponible) pour calculer le temps restant.'
+  }
   if (entity.is_infinite_consumption) {
     return 'Consommation détectée sans delta horaire : stock à risque.'
-  }
-  if (entity.is_infinite_autonomy || entity.formatted_autonomy === '∞') {
-    return 'Pas assez de données pour calculer le temps restant avant rupture.'
   }
   const severity = getAutonomySeverity(entity)
   if (severity === 'critical') return 'Moins de 24 heures de temps restant — action rapide recommandée.'

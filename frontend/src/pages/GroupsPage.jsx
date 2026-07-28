@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useRef, useState } from 'react'
 import Topbar from '../components/Topbar.jsx'
 import WelcomeBanner from '../components/WelcomeBanner.jsx'
 import { apiFetch } from '../auth.js'
@@ -6,6 +6,7 @@ import AutonomyBadge from '../components/AutonomyBadge.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import PageEnter from '../components/PageEnter.jsx'
 import { useChartPalette } from '../hooks/useChartPalette.js'
+import { createChart, seriesPointRadius, xAxisTicks } from '../utils/chartAxis.js'
 import {
   formatAutonomyValue,
   getAutonomySeverity,
@@ -14,6 +15,65 @@ import {
 } from '../utils/format.js'
 
 const isFiniteNumber = (value) => typeof value === 'number' && Number.isFinite(value)
+
+const extractPower = (value) => {
+  if (value == null || value === '') return 0
+  const match = String(value).trim().replace(',', '.').match(/(\d+(?:\.\d+)?)/)
+  return match ? Number(match[1]) : 0
+}
+
+/** Autonomie = (volume_CP × proportion + CJ) / conso_horaire_moyenne.
+ * Sans conso moyenne significative (« - ») → autonomie indéterminée.
+ */
+const buildGroupAutonomyEntity = (group, allBlocks = [], meanHourlyLh = null) => {
+  // Uniquement la moyenne affichée dans les métriques (pas de fallback backend)
+  const mean = isFiniteNumber(meanHourlyLh) && meanHourlyLh > 0 ? meanHourlyLh : null
+
+  if (mean == null) {
+    return {
+      ...group,
+      autonomie_hours: null,
+      formatted_autonomy: '∞',
+      is_infinite_autonomy: true,
+      is_infinite_consumption: false,
+    }
+  }
+
+  const cpVolume = isFiniteNumber(group.latest_main_volume) ? group.latest_main_volume : null
+  if (cpVolume == null) {
+    return {
+      ...group,
+      autonomie_hours: null,
+      formatted_autonomy: '∞',
+      is_infinite_autonomy: true,
+      is_infinite_consumption: false,
+    }
+  }
+
+  const peers = (allBlocks || []).filter((block) => (
+    group.site_id != null && String(block.site_id) === String(group.site_id)
+  ))
+  const peerList = peers.length ? peers : [group]
+  const totalPower = peerList.reduce((sum, block) => sum + extractPower(block.puissance), 0)
+  const groupPower = extractPower(group.puissance)
+  const powerShare = totalPower > 0
+    ? groupPower / totalPower
+    : (isFiniteNumber(group.power_share) ? group.power_share : 1)
+  const cjVolume = isFiniteNumber(group.latest_daily_volume) ? group.latest_daily_volume : 0
+  const volumeProportionnel = cpVolume * powerShare + cjVolume
+  const autonomyHours = volumeProportionnel / mean
+
+  return {
+    ...group,
+    power_share: powerShare,
+    volume_proportionnel: Number(volumeProportionnel.toFixed(1)),
+    autonomie_hours: Number(autonomyHours.toFixed(1)),
+    formatted_autonomy: null,
+    is_infinite_autonomy: false,
+    is_infinite_consumption: false,
+  }
+}
+
 
 const buildDerivedMetric = (values = []) => {
   const normalizedValues = (values || []).filter(isFiniteNumber).filter((value) => value > 0)
@@ -90,29 +150,101 @@ const buildPeriodSeriesStats = (values = []) => {
 }
 
 /**
- * Consommation horaire (L/h) sur les périodes où les heures sont > 0.
+ * Série L/h pour la courbe :
+ * - zero     : conso = 0 & heures > 0 → 0 L/h (point normal sur la courbe)
+ * - infinite : conso > 0 & heures = 0 → ∞ (marqueur en haut d’échelle)
+ * - missing  : pas de relevé (null) → trou
+ * Toute date avec heures + conso numériques est affichée (y compris 0h/0L → 0).
  */
-const buildHourlyConsumptionStats = (hours = [], consumption = []) => {
-  const rates = []
+const buildHourlyRateSeries = (hours = [], consumption = []) => {
   const len = Math.max(hours.length, consumption.length)
+  const kinds = []
+  const raw = []
+
   for (let index = 0; index < len; index += 1) {
     const hoursValue = hours[index]
     const consumptionValue = consumption[index]
-    if (!isFiniteNumber(hoursValue) || hoursValue <= 0) continue
-    if (!isFiniteNumber(consumptionValue)) continue
-    rates.push(consumptionValue / hoursValue)
+    if (!isFiniteNumber(hoursValue) || !isFiniteNumber(consumptionValue)) {
+      kinds.push('missing')
+      raw.push(null)
+      continue
+    }
+    if (hoursValue > 0 && consumptionValue === 0) {
+      kinds.push('zero')
+      raw.push(0)
+      continue
+    }
+    if (hoursValue === 0 && consumptionValue > 0) {
+      kinds.push('infinite')
+      raw.push(Infinity)
+      continue
+    }
+    if (hoursValue > 0) {
+      kinds.push('normal')
+      raw.push(Number((consumptionValue / hoursValue).toFixed(2)))
+      continue
+    }
+    // 0 h et 0 L : point à 0 pour garder toutes les dates visibles
+    kinds.push('zero')
+    raw.push(0)
   }
+
+  const finitePositive = raw.filter((value) => isFiniteNumber(value) && value > 0)
+  const finiteAll = raw.filter((value) => isFiniteNumber(value))
+  const hasInfinite = raw.some((value) => value === Infinity)
+  const baseMax = finitePositive.length
+    ? Math.max(...finitePositive)
+    : (finiteAll.length ? Math.max(...finiteAll, 1) : 1)
+  const infinityDisplay = Number((Math.max(baseMax * 1.35, 1)).toFixed(2))
+  const suggestedMax = hasInfinite
+    ? infinityDisplay
+    : (finiteAll.length ? Math.max(...finiteAll, 0) * 1.1 || 1 : 1)
+
+  const data = raw.map((value) => (value === Infinity ? infinityDisplay : value))
+
+  return {
+    data,
+    kinds,
+    infinityDisplay,
+    suggestedMax,
+    hasZero: kinds.includes('zero'),
+    hasInfinite,
+  }
+}
+
+/**
+ * Métriques L/h : uniquement les taux significatifs (> 0).
+ * Exclus : 0 L/h, ∞, absents, 0h+0L → tiret s’il ne reste rien.
+ */
+const buildHourlyConsumptionStats = (hours = [], consumption = []) => {
+  const series = buildHourlyRateSeries(hours, consumption)
+  const rates = series.data
+    .map((value, index) => (series.kinds[index] === 'normal' && value > 0 ? value : null))
+    .filter(isFiniteNumber)
+
   if (!rates.length) {
-    return { mean: null, max: null, min: null, stddev: null, noData: true }
+    return {
+      mean: null,
+      max: null,
+      min: null,
+      stddev: null,
+      noData: true,
+      zeroCount: series.kinds.filter((k) => k === 'zero').length,
+      infiniteCount: series.kinds.filter((k) => k === 'infinite').length,
+    }
   }
+
   const mean = rates.reduce((sum, value) => sum + value, 0) / rates.length
   const variance = rates.reduce((sum, value) => sum + (value - mean) ** 2, 0) / rates.length
+
   return {
     mean,
     max: Math.max(...rates),
     min: Math.min(...rates),
     stddev: Math.sqrt(variance),
     noData: false,
+    zeroCount: series.kinds.filter((k) => k === 'zero').length,
+    infiniteCount: series.kinds.filter((k) => k === 'infinite').length,
   }
 }
 
@@ -121,10 +253,7 @@ function GroupsPage({ onNavigate }) {
   const [groupsData, setGroupsData] = useState(null)
   const [rapportDebut, setRapportDebut] = useState('')
   const [rapportFin, setRapportFin] = useState('')
-  const [draftRapportDebut, setDraftRapportDebut] = useState('')
-  const [draftRapportFin, setDraftRapportFin] = useState('')
   const [siteId, setSiteId] = useState('')
-  const [draftSiteId, setDraftSiteId] = useState('')
   const queryGroupId = useMemo(() => new URLSearchParams(window.location.search).get('groupId'), [])
   const queryGroupLabel = useMemo(() => new URLSearchParams(window.location.search).get('groupLabel'), [])
   const queryMode = useMemo(() => new URLSearchParams(window.location.search).get('mode'), [])
@@ -133,9 +262,9 @@ function GroupsPage({ onNavigate }) {
   // groupe précis (queryGroupId présent, ex. depuis une alerte du Dashboard), on
   // garde le comportement existant : vue détail sur ce groupe.
   const [mode, setMode] = useState(queryMode || (queryGroupId ? 'details' : 'all'))
-  const [draftMode, setDraftMode] = useState(queryMode || (queryGroupId ? 'details' : 'all'))
   const [filtering, setFiltering] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
+  const filterSeq = useRef(0)
 
   const reportChoices = useMemo(() => (groupsData?.rapport_choices || groupsData?.report_choices || []), [groupsData])
   const rapportDebutIndex = useMemo(() => {
@@ -153,41 +282,43 @@ function GroupsPage({ onNavigate }) {
   const startIndex = Math.min(rapportDebutIndex, rapportFinIndex)
   const endIndex = Math.max(rapportDebutIndex, rapportFinIndex)
 
-  const safeValue = (value) => (typeof value === 'number' && Number.isFinite(value) ? value : null)
-
   const loadGroupsData = async (queryParams = '', options = {}) => {
+    const seq = ++filterSeq.current
     try {
       if (options.isFilter) setFiltering(true)
       const data = await apiFetch(`/api/v1/dashboard/groupes${queryParams ? `?${queryParams}` : ''}`)
+      if (seq !== filterSeq.current) return
       const choices = data.rapport_choices || data.report_choices || []
       const normalizedBlocks = (data.group_blocks || []).map((block) => ({
         ...block,
         hours: buildDerivedMetric(block.hours_run || []),
         consumption_stats: buildDerivedMetric(block.consumption || []),
         volume_stats: buildDerivedMetric(block.volume || []),
-        rate: block.mean_hourly_consumption != null ? block.mean_hourly_consumption : null,
+        rate: block.mean_hourly_consumption_deduite != null ? block.mean_hourly_consumption_deduite : null,
       }))
 
       setGroupsData({
         ...data,
         group_blocks: normalizedBlocks,
       })
-      const nextDebut = data.selected_rapport_debut != null ? String(data.selected_rapport_debut) : String(choices[0]?.id ?? '')
-      const nextFin = data.selected_rapport_fin != null ? String(data.selected_rapport_fin) : String(choices[choices.length - 1]?.id ?? '')
-      setRapportDebut(nextDebut)
-      setRapportFin(nextFin)
-      setDraftRapportDebut(nextDebut)
-      setDraftRapportFin(nextFin)
+      // L’API Groupes ignore rapport_debut/fin : ne pas écraser la période choisie côté client
+      if (!options.preservePeriod) {
+        const nextDebut = data.selected_rapport_debut != null ? String(data.selected_rapport_debut) : String(choices[0]?.id ?? '')
+        const nextFin = data.selected_rapport_fin != null ? String(data.selected_rapport_fin) : String(choices[choices.length - 1]?.id ?? '')
+        setRapportDebut(nextDebut)
+        setRapportFin(nextFin)
+      }
       if (!options.preserveSiteSelection) {
         const nextSite = data.selected_site_id != null ? String(data.selected_site_id) : ''
         setSiteId(nextSite)
-        setDraftSiteId(nextSite)
       }
     } catch (error) {
       console.warn('Groups backend unavailable:', error)
     } finally {
-      setFiltering(false)
-      setInitialLoading(false)
+      if (seq === filterSeq.current) {
+        setFiltering(false)
+        setInitialLoading(false)
+      }
     }
   }
 
@@ -196,25 +327,29 @@ function GroupsPage({ onNavigate }) {
     loadGroupsData()
   }, [])
 
-  const applyFilters = async (event) => {
-    event.preventDefault()
-    setSiteId(draftSiteId)
-    setMode(draftMode)
-    setRapportDebut(draftRapportDebut)
-    setRapportFin(draftRapportFin)
+  const runFilters = async (next = {}) => {
+    // Période = filtre client uniquement (l’API Groupes ne la gère pas)
+    if (next.rapportDebut != null) setRapportDebut(next.rapportDebut)
+    if (next.rapportFin != null) setRapportFin(next.rapportFin)
+
+    if (next.siteId === undefined) return
+
+    const site = next.siteId
+    setSiteId(site)
     const params = new URLSearchParams()
-    if (draftRapportDebut) params.set('rapport_debut', draftRapportDebut)
-    if (draftRapportFin) params.set('rapport_fin', draftRapportFin)
-    if (draftSiteId) params.set('site_id', draftSiteId)
-    if (draftMode) params.set('mode', draftMode)
-    await loadGroupsData(params.toString(), { preserveSiteSelection: true, isFilter: true })
+    if (site) params.set('site_id', site)
+    await loadGroupsData(params.toString(), {
+      preserveSiteSelection: true,
+      preservePeriod: true,
+      isFilter: true,
+    })
   }
 
   useEffect(() => {
     if (!window.Chart || !groupsData) return undefined
     const charts = []
     const sliceSeries = (values = []) => (values || []).slice(startIndex, endIndex + 1)
-    const baseOptions = (unit, beginZero = false) => ({
+    const baseOptions = (unit, beginZero = false, suggestedMax = undefined) => ({
       responsive: true,
       maintainAspectRatio: false,
       spanGaps: true,
@@ -239,6 +374,8 @@ function GroupsPage({ onNavigate }) {
 =======
             label: (context) => {
               const y = context.parsed?.y
+              const kind = context.dataset?.pointKinds?.[context.dataIndex]
+              if (kind === 'infinite') return ' ∞ L/h (conso sans heures)'
               if (y == null || !Number.isFinite(y)) return ' —'
               return ` ${y.toLocaleString('fr-FR')} ${unit}`
 >>>>>>> d2b7279f27938bd4c7bf270e0c7bd8e4f533c608
@@ -247,8 +384,19 @@ function GroupsPage({ onNavigate }) {
         },
       },
       scales: {
-        x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
-        y: { beginAtZero: beginZero, ticks: { color: chartPalette.text, callback: (value) => `${value.toLocaleString('fr-FR')} ${unit}` }, grid: { color: chartPalette.grid } },
+        x: {
+          ticks: xAxisTicks(labels.length, chartPalette.text),
+          grid: { color: chartPalette.grid },
+        },
+        y: {
+          beginAtZero: beginZero,
+          suggestedMax,
+          ticks: {
+            color: chartPalette.text,
+            callback: (value) => `${value.toLocaleString('fr-FR')} ${unit}`,
+          },
+          grid: { color: chartPalette.grid },
+        },
       },
       interaction: {
         mode: 'index',
@@ -256,10 +404,13 @@ function GroupsPage({ onNavigate }) {
       },
     })
 
+    const pointRadius = seriesPointRadius(labels.length)
+
     groupsData.group_blocks?.forEach((block) => {
       const makeChart = (elementId, data, fill, label, color, unit = 'h') => {
         const target = document.getElementById(elementId)
         if (!target) return
+<<<<<<< HEAD
         const ctx = target.getContext('2d')
         const gradient = ctx.createLinearGradient(0, 0, 0, target.clientHeight * 1.5)
         const baseColor = color || '#0b3d7a'
@@ -268,6 +419,9 @@ function GroupsPage({ onNavigate }) {
         gradient.addColorStop(1, `${baseColor}00`)
 
         const chart = new Chart(target, {
+=======
+        const chart = createChart(target, {
+>>>>>>> dec564dbeffc78db0c51f62e4433fa637cb8c6af
           type: 'line',
           data: {
             labels,
@@ -280,6 +434,7 @@ function GroupsPage({ onNavigate }) {
               tension: 0.3,
               fill,
 <<<<<<< HEAD
+<<<<<<< HEAD
               pointRadius: 0,
               pointBackgroundColor: baseColor,
               pointHoverRadius: 6,
@@ -287,28 +442,99 @@ function GroupsPage({ onNavigate }) {
               pointHoverBackgroundColor: '#fff',
 =======
               pointRadius: 4,
+=======
+              pointRadius,
+>>>>>>> dec564dbeffc78db0c51f62e4433fa637cb8c6af
               spanGaps: true,
 >>>>>>> d2b7279f27938bd4c7bf270e0c7bd8e4f533c608
             }],
           },
           options: baseOptions(unit, true),
         })
-        charts.push(chart)
+        if (chart) charts.push(chart)
       }
 
       makeChart(`chart-group-${block.id}-hours`, block.hours_run || [], true, block.label, block.color || '#0b3d7a', 'h')
       makeChart(`chart-group-${block.id}-consumption`, block.consumption || [], true, 'Consommation', block.color || '#0b3d7a', 'L')
-      const hourlyValues = (block.hours_run || []).map((hours, index) => {
-        const hoursValue = safeValue(hours)
-        const consumptionValue = safeValue((block.consumption || [])[index])
-        if (hoursValue == null || consumptionValue == null || hoursValue <= 0) return null
-        return Number((consumptionValue / hoursValue).toFixed(2))
-      })
-      makeChart(`chart-group-${block.id}-hourly-consumption`, hourlyValues, true, 'Consommation horaire', block.color || '#0b3d7a', 'L/h')
+
+      const hourlyTarget = document.getElementById(`chart-group-${block.id}-hourly-consumption`)
+      if (hourlyTarget) {
+        const color = block.color || '#0b3d7a'
+        const hourlySeries = buildHourlyRateSeries(
+          sliceSeries(block.hours_run || []),
+          sliceSeries(block.consumption || []),
+        )
+        const slicedData = hourlySeries.data
+        const slicedKinds = hourlySeries.kinds
+        const pointBackgroundColor = slicedKinds.map((kind) => {
+          if (kind === 'infinite') return '#b91c1c'
+          if (kind === 'missing') return 'transparent'
+          return color
+        })
+        const pointBorderColor = slicedKinds.map((kind) => {
+          if (kind === 'infinite') return '#7f1d1d'
+          if (kind === 'missing') return 'transparent'
+          return color
+        })
+        const pointRadius = slicedKinds.map((kind) => {
+          if (kind === 'missing') return 0
+          if (kind === 'infinite') return labels.length > 12 ? 5 : 7
+          return seriesPointRadius(labels.length)
+        })
+        const pointStyle = slicedKinds.map((kind) => (
+          kind === 'infinite' ? 'triangle' : 'circle'
+        ))
+
+        const hourlyOptions = baseOptions('L/h', true, hourlySeries.suggestedMax)
+        const chart = createChart(hourlyTarget, {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [{
+              label: 'Consommation horaire',
+              data: slicedData,
+              borderColor: color,
+              backgroundColor: `${color}20`,
+              borderWidth: 2,
+              tension: 0.35,
+              fill: true,
+              spanGaps: true,
+              pointKinds: slicedKinds,
+              pointBackgroundColor,
+              pointBorderColor,
+              pointRadius,
+              pointHoverRadius: pointRadius.map((radius) => Math.max(radius, 4) + 2),
+              pointStyle,
+              pointBorderWidth: 2,
+            }],
+          },
+          options: hourlyOptions,
+          plugins: [{
+            id: `hourly-infinite-labels-${block.id}`,
+            afterDatasetsDraw(chartInstance) {
+              const { ctx } = chartInstance
+              const meta = chartInstance.getDatasetMeta(0)
+              if (!meta?.data) return
+              ctx.save()
+              ctx.font = 'bold 11px sans-serif'
+              ctx.fillStyle = '#b91c1c'
+              ctx.textAlign = 'center'
+              meta.data.forEach((point, index) => {
+                if (slicedKinds[index] !== 'infinite' || !point) return
+                const { x, y } = point.getProps(['x', 'y'], true)
+                if (!Number.isFinite(x) || !Number.isFinite(y)) return
+                ctx.fillText('∞', x, y - 12)
+              })
+              ctx.restore()
+            },
+          }],
+        })
+        if (chart) charts.push(chart)
+      }
     })
 
     return () => charts.forEach((chart) => chart.destroy())
-  }, [chartPalette, groupsData, startIndex, endIndex])
+  }, [chartPalette, groupsData, startIndex, endIndex, mode])
 
   const selectedSite = groupsData?.sites?.find((site) => String(site.id) === String(siteId)) ?? groupsData?.sites?.[0]
 
@@ -361,10 +587,15 @@ function GroupsPage({ onNavigate }) {
       <PageEnter>
       <main className={`groups-grid ${filtering ? 'is-filtering' : ''}`}>
         <WelcomeBanner subtitle="Tous les groupes d’abord — affinez avec les filtres si besoin." />
-        <form className="groups-filter-bar" onSubmit={applyFilters}>
+        <form className="groups-filter-bar" onSubmit={(event) => event.preventDefault()}>
           <div className="filter-field">
             <label htmlFor="rapport_debut">Période — début</label>
-            <select id="rapport_debut" value={draftRapportDebut} onChange={(event) => setDraftRapportDebut(event.target.value)}>
+            <select
+              id="rapport_debut"
+              value={rapportDebut}
+              disabled={filtering}
+              onChange={(event) => runFilters({ rapportDebut: event.target.value })}
+            >
               {(groupsData.rapport_choices || []).map((choice) => (
                 <option key={choice.id} value={String(choice.id)}>{choice.label}</option>
               ))}
@@ -372,7 +603,12 @@ function GroupsPage({ onNavigate }) {
           </div>
           <div className="filter-field">
             <label htmlFor="rapport_fin">Période — fin</label>
-            <select id="rapport_fin" value={draftRapportFin} onChange={(event) => setDraftRapportFin(event.target.value)}>
+            <select
+              id="rapport_fin"
+              value={rapportFin}
+              disabled={filtering}
+              onChange={(event) => runFilters({ rapportFin: event.target.value })}
+            >
               {(groupsData.rapport_choices || []).map((choice) => (
                 <option key={choice.id} value={String(choice.id)}>{choice.label}</option>
               ))}
@@ -380,7 +616,12 @@ function GroupsPage({ onNavigate }) {
           </div>
           <div className="filter-field">
             <label htmlFor="site_id">Site</label>
-            <select id="site_id" value={draftSiteId} onChange={(event) => setDraftSiteId(event.target.value)}>
+            <select
+              id="site_id"
+              value={siteId}
+              disabled={filtering}
+              onChange={(event) => runFilters({ siteId: event.target.value })}
+            >
               <option value="">Tous les sites</option>
               {(groupsData.sites || []).map((site) => (
                 <option key={site.id} value={String(site.id)}>{site.nom_site}</option>
@@ -389,25 +630,15 @@ function GroupsPage({ onNavigate }) {
           </div>
           <div className="filter-field">
             <label htmlFor="view_mode">Affichage</label>
-            <select id="view_mode" value={draftMode} onChange={(event) => setDraftMode(event.target.value)}>
+            <select
+              id="view_mode"
+              value={mode}
+              disabled={filtering}
+              onChange={(event) => setMode(event.target.value)}
+            >
               <option value="all">Vue d’ensemble</option>
               <option value="details">Détail</option>
             </select>
-          </div>
-          <div className="filter-actions">
-            <button
-              type="submit"
-              className={`filter-submit${(
-                String(draftRapportDebut) !== String(rapportDebut)
-                || String(draftRapportFin) !== String(rapportFin)
-                || String(draftSiteId) !== String(siteId)
-                || String(draftMode) !== String(mode)
-              ) ? ' is-dirty' : ''}`}
-              disabled={filtering}
-              aria-live="polite"
-            >
-              {filtering ? 'Filtrage…' : 'Appliquer'}
-            </button>
           </div>
         </form>
 
@@ -460,12 +691,18 @@ function GroupsPage({ onNavigate }) {
                   <tbody>
                     {(groupsData.group_blocks || []).map((g) => {
                       const siteName = g.site_nom || g.nom_site || g.site_name || (groupsData.sites || []).find((s) => String(s.id) === String(g.site_id))?.nom_site || ''
-                      const severity = getAutonomySeverity(g)
                       const hoursWindow = (g.hours_run || []).slice(startIndex, endIndex + 1)
                       const consWindow = (g.consumption || []).slice(startIndex, endIndex + 1)
                       const hourly = buildHourlyConsumptionStats(hoursWindow, consWindow)
                       const consumption = buildPeriodSeriesStats(consWindow)
                       const hours = buildPeriodSeriesStats(hoursWindow)
+                      // Même calcul d’autonomie que la vue détail (pas le flag backend 0 h)
+                      const autonomyEntity = buildGroupAutonomyEntity(
+                        g,
+                        groupsData.group_blocks || [],
+                        hourly.mean,
+                      )
+                      const severity = getAutonomySeverity(autonomyEntity)
                       return (
                         <tr key={g.id} className={`autonomy-row autonomy-row--${severity}`}>
                           <td>{g.label}</td>
@@ -474,8 +711,8 @@ function GroupsPage({ onNavigate }) {
                           <td>{formatMetric(consumption.weekN)}</td>
                           <td>{formatMetric(hours.mean)}</td>
                           <td>
-                            <div className={`autonomy-cell autonomy-cell--${severity}`} title={formatAutonomyValue(g)}>
-                              <span className="autonomy-cell-value">{formatAutonomyValue(g)}</span>
+                            <div className={`autonomy-cell autonomy-cell--${severity}`} title={formatAutonomyValue(autonomyEntity)}>
+                              <span className="autonomy-cell-value">{formatAutonomyValue(autonomyEntity)}</span>
                               <span className="autonomy-cell-label">{getAutonomySeverityLabel(severity)}</span>
                             </div>
                           </td>
@@ -494,7 +731,15 @@ function GroupsPage({ onNavigate }) {
             }).map((group) => (
             <article key={group.id} className="group-card" style={{ borderLeft: `4px solid ${group.color || '#0b3d7a'}` }}>
               {(() => {
-                const severity = getAutonomySeverity(group)
+                const hoursWindow = (group.hours_run || []).slice(startIndex, endIndex + 1)
+                const consumptionWindow = (group.consumption || []).slice(startIndex, endIndex + 1)
+                const hourlyStats = buildHourlyConsumptionStats(hoursWindow, consumptionWindow)
+                const autonomyEntity = buildGroupAutonomyEntity(
+                  group,
+                  groupsData.group_blocks || [],
+                  hourlyStats.mean,
+                )
+                const severity = getAutonomySeverity(autonomyEntity)
                 return (
                   <div className={`group-autonomy-hero group-autonomy-hero--${severity}`}>
                     <div className="group-autonomy-hero-copy">
@@ -504,7 +749,7 @@ function GroupsPage({ onNavigate }) {
                       </p>
                     </div>
                     <div className="group-autonomy-hero-value-wrap">
-                      <AutonomyBadge entity={group} size="lg" />
+                      <AutonomyBadge entity={autonomyEntity} size="lg" />
                     </div>
                   </div>
                 )
@@ -637,6 +882,20 @@ function GroupsPage({ onNavigate }) {
                 </div>
                 <div className="chart-card">
                   <span className="curve-title">Courbe consommation horaire</span>
+                  {(() => {
+                    const hourlySeries = buildHourlyRateSeries(
+                      (group.hours_run || []).slice(startIndex, endIndex + 1),
+                      (group.consumption || []).slice(startIndex, endIndex + 1),
+                    )
+                    if (!hourlySeries.hasInfinite) return null
+                    return (
+                      <div className="curve-anomaly-legend" aria-label="Légende des valeurs aberrantes">
+                        <span className="curve-anomaly-legend__item curve-anomaly-legend__item--infinite">
+                          ▲ ∞ L/h — conso sans heures
+                        </span>
+                      </div>
+                    )
+                  })()}
                   <div className="chart-box small-box"><canvas id={`chart-group-${group.id}-hourly-consumption`} /></div>
                 </div>
               </div>

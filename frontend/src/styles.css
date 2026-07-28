@@ -640,10 +640,32 @@ html.theme-light .group-card {
   font-size: 0.78rem;
   font-weight: 700;
   border: 1px solid transparent;
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1.2;
+  transition: box-shadow 0.15s ease, transform 0.15s ease, opacity 0.15s ease;
+}
+
+button.alert-legend-item {
+  appearance: none;
+}
+
+.alert-legend-item:hover {
+  transform: translateY(-1px);
+}
+
+.alert-legend-item.is-active {
+  box-shadow: 0 0 0 2px currentColor;
 }
 
 .alert-legend-item strong {
   font-size: 0.95rem;
+}
+
+.alert-legend--all {
+  background: #e2e8f0;
+  color: #334155;
+  border-color: #cbd5e1;
 }
 
 .alert-legend--critical {
@@ -1685,6 +1707,27 @@ button.alert-item--link {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.12em;
+}
+
+.curve-anomaly-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: -2px 0 8px;
+}
+
+.curve-anomaly-legend__item {
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.curve-anomaly-legend__item--zero {
+  color: #d97706;
+}
+
+.curve-anomaly-legend__item--infinite {
+  color: #b91c1c;
 }
 
 .small-box {
