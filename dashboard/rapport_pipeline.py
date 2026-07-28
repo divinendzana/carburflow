@@ -30,6 +30,7 @@ from dashboard.norme import (
     ImportValidationError,
     _friendly_error,
     _parse_date,
+    coerce_french_week_period,
     _to_float,
     _to_int_or_none,
     _to_name_or_none,
@@ -338,11 +339,15 @@ def generate_rapport_template_xlsx(
     for item in meta_rows:
         ws_meta.append(list(item))
 
-    # Dates Excel natives (pas de texte jj/mm) → pas d'ambiguïté US/FR à la réouverture
-    for row_idx in (4, 5, 9):  # date_debut, date_fin, date_generation
+    # Dates en TEXTE jj/mm/aaaa : Excel ne peut plus les réinterpréter en mm/jj (locale US)
+    for row_idx in (4, 5):  # date_debut, date_fin
         cell = ws_meta.cell(row=row_idx, column=2)
         if isinstance(cell.value, date_type):
-            cell.number_format = 'DD/MM/YYYY'
+            cell.value = cell.value.strftime('%d/%m/%Y')
+        cell.number_format = '@'
+    gen_cell = ws_meta.cell(row=9, column=2)
+    if isinstance(gen_cell.value, date_type):
+        gen_cell.number_format = 'DD/MM/YYYY'
 
     ws_meta.column_dimensions['A'].width = 25
     ws_meta.column_dimensions['B'].width = 25
@@ -523,106 +528,101 @@ def analyze_rapport_rows(rows: list[dict], *, create_missing: bool = False) -> A
     g_names: dict[str, list[int]] = {}
     cj_links: dict[str, dict] = {}
 
-    for idx, row in enumerate(rows):
-        excel_row = idx + 2
-        d1 = d2 = None
-
-        try:
-            raw_d1 = row.get('date_debut')
-            if raw_d1 is None or str(raw_d1).strip() == '':
-                issues.append(
-                    AnalysisIssue(
-                        level='error',
-                        row=excel_row,
-                        column='date_debut',
-                        message='Date de début vide.',
-                        how_to_fix='Remplissez la colonne Date de début (ex. 13/07/2026).',
-                    )
-                )
-            else:
-                d1 = _parse_date(raw_d1, row=excel_row, column='date_debut')
-        except ImportValidationError as exc:
-            for err in exc.errors:
-                issues.append(
-                    AnalysisIssue(
-                        level='error',
-                        row=err.get('row'),
-                        column=err.get('column'),
-                        message=err.get('message') or str(exc),
-                        how_to_fix=err.get('how_to_fix') or '',
-                    )
-                )
-
-        try:
-            raw_d2 = row.get('date_fin')
-            if raw_d2 is None or str(raw_d2).strip() == '':
-                issues.append(
-                    AnalysisIssue(
-                        level='error',
-                        row=excel_row,
-                        column='date_fin',
-                        message='Date de fin vide.',
-                        how_to_fix='Remplissez la colonne Date de fin (ex. 17/07/2026).',
-                    )
-                )
-            else:
-                d2 = _parse_date(raw_d2, row=excel_row, column='date_fin')
-        except ImportValidationError as exc:
-            for err in exc.errors:
-                issues.append(
-                    AnalysisIssue(
-                        level='error',
-                        row=err.get('row'),
-                        column=err.get('column'),
-                        message=err.get('message') or str(exc),
-                        how_to_fix=err.get('how_to_fix') or '',
-                    )
-                )
-
-        if idx == 0:
-            date_debut, date_fin = d1, d2
-        elif date_debut and date_fin and d1 and d2 and (d1 != date_debut or d2 != date_fin):
+    # Période lue une seule fois (Entête / 1re valeur), puis appliquée à toutes les lignes
+    try:
+        raw_d1 = next((row.get('date_debut') for row in rows if row.get('date_debut') not in (None, '')), None)
+        raw_d2 = next((row.get('date_fin') for row in rows if row.get('date_fin') not in (None, '')), None)
+        if raw_d1 is None or str(raw_d1).strip() == '':
             issues.append(
                 AnalysisIssue(
                     level='error',
-                    row=excel_row,
+                    row=2,
                     column='date_debut',
-                    message='Période différente des autres lignes.',
-                    how_to_fix=(
-                        f'Mettez partout : {date_debut.strftime("%d/%m/%Y")} → '
-                        f'{date_fin.strftime("%d/%m/%Y")}.'
-                    ),
+                    message='Date de début vide.',
+                    how_to_fix='Renseignez date_debut dans la feuille Entête (ex. 13/07/2026).',
+                )
+            )
+        else:
+            date_debut = _parse_date(raw_d1, row=2, column='date_debut')
+        if raw_d2 is None or str(raw_d2).strip() == '':
+            issues.append(
+                AnalysisIssue(
+                    level='error',
+                    row=2,
+                    column='date_fin',
+                    message='Date de fin vide.',
+                    how_to_fix='Renseignez date_fin dans la feuille Entête (ex. 17/07/2026).',
+                )
+            )
+        else:
+            date_fin = _parse_date(raw_d2, row=2, column='date_fin')
+    except ImportValidationError as exc:
+        for err in exc.errors:
+            issues.append(
+                AnalysisIssue(
+                    level='error',
+                    row=err.get('row') or 2,
+                    column=err.get('column'),
+                    message=err.get('message') or str(exc),
+                    how_to_fix=err.get('how_to_fix') or '',
                 )
             )
 
-        if d1 and d2 and d1 > d2:
+    if date_debut and date_fin:
+        if date_debut > date_fin:
             issues.append(
                 AnalysisIssue(
                     level='error',
-                    row=excel_row,
+                    row=2,
                     column='date_debut',
                     message='La date de début est après la date de fin.',
-                    how_to_fix='Inversez ou corrigez les deux dates.',
+                    how_to_fix='Inversez ou corrigez les deux dates dans la feuille Entête.',
                 )
             )
-        elif d1 and d2 and (d2 - d1).days > 14:
-            # Protège contre les dates Excel mal interprétées (ex. 03/08 lu comme 08/03)
-            issues.append(
-                AnalysisIssue(
-                    level='error',
-                    row=excel_row,
-                    column='date_debut',
-                    message=(
-                        f'Période trop longue ({(d2 - d1).days} jours) : '
-                        f'{d1.strftime("%d/%m/%Y")} → {d2.strftime("%d/%m/%Y")}.'
-                    ),
-                    how_to_fix=(
-                        'Un relevé hebdo fait au plus 14 jours. Vérifiez jj/mm/aaaa '
-                        '(ex. 03/08/2026 = 3 août, pas le 8 mars).'
-                    ),
+        else:
+            fixed_d1, fixed_d2, corrected = coerce_french_week_period(date_debut, date_fin, max_days=14)
+            if corrected:
+                date_debut, date_fin = fixed_d1, fixed_d2
+                issues.append(
+                    AnalysisIssue(
+                        level='warning',
+                        row=2,
+                        column='date_debut',
+                        message=(
+                            f'Dates réinterprétées en jj/mm/aaaa : '
+                            f'{date_debut.strftime("%d/%m/%Y")} → {date_fin.strftime("%d/%m/%Y")} '
+                            f'(Excel avait lu une période impossible).'
+                        ),
+                        how_to_fix=(
+                            'Préférez saisir les dates en texte jj/mm/aaaa dans Entête, '
+                            'ou vérifier que Excel n’est pas en format mois/jour (US).'
+                        ),
+                    )
                 )
-            )
+            elif (date_fin - date_debut).days > 14:
+                issues.append(
+                    AnalysisIssue(
+                        level='error',
+                        row=2,
+                        column='date_debut',
+                        message=(
+                            f'Période trop longue ({(date_fin - date_debut).days} jours) : '
+                            f'{date_debut.strftime("%d/%m/%Y")} → {date_fin.strftime("%d/%m/%Y")}.'
+                        ),
+                        how_to_fix=(
+                            'Un relevé hebdo fait au plus 14 jours. Vérifiez jj/mm/aaaa '
+                            'dans la feuille Entête (ex. 03/08/2026 = 3 août, pas le 8 mars).'
+                        ),
+                    )
+                )
 
+    if date_debut and date_fin:
+        for row in rows:
+            row['date_debut'] = date_debut
+            row['date_fin'] = date_fin
+
+    for idx, row in enumerate(rows):
+        excel_row = idx + 2
         cp_name = _to_name_or_none(row.get('id_cuve_principale'))
         cj_name = _to_name_or_none(row.get('id_cuve_journaliere'))
         raw_groupe = row.get('id_groupe')

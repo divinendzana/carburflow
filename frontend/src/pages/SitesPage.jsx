@@ -6,7 +6,7 @@ import AutonomyBadge from '../components/AutonomyBadge.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import PageEnter from '../components/PageEnter.jsx'
 import { useChartPalette } from '../hooks/useChartPalette.js'
-import { createChart, seriesPointRadius, xAxisTicks } from '../utils/chartAxis.js'
+import { createChart, defaultPeriodIndices, MAX_CHART_WEEKS, seriesPointRadius, toChartLabels, visibleChartRange, xAxisTicks } from '../utils/chartAxis.js'
 import { formatAutonomyValue, getAutonomySeverity } from '../utils/format.js'
 
 function SitesPage({ onNavigate }) {
@@ -16,6 +16,7 @@ function SitesPage({ onNavigate }) {
   const [startIdx, setStartIdx] = useState(0)
   const [endIdx, setEndIdx] = useState(0)
   const [siteId, setSiteId] = useState('')
+  const [chartPan, setChartPan] = useState(0)
   const querySiteId = useMemo(() => new URLSearchParams(window.location.search).get('siteId'), [])
   const querySiteName = useMemo(() => new URLSearchParams(window.location.search).get('siteName'), [])
   const queryMode = useMemo(() => new URLSearchParams(window.location.search).get('mode'), [])
@@ -158,11 +159,23 @@ function SitesPage({ onNavigate }) {
     }
 
     if (sitesDashboard.labels?.length) {
-      const last = sitesDashboard.labels.length - 1
-      setStartIdx(0)
+      const { first, last } = defaultPeriodIndices(sitesDashboard.labels.length)
+      setStartIdx(first)
       setEndIdx(last)
     }
   }, [sitesDashboard, querySiteId, querySiteName, siteOptions])
+
+  const periodStart = Math.min(startIdx, endIdx)
+  const periodEnd = Math.max(startIdx, endIdx)
+  const chartWindow = useMemo(
+    () => visibleChartRange(periodStart, periodEnd, chartPan),
+    [periodStart, periodEnd, chartPan],
+  )
+  const { viewStart, viewEnd, maxPan, canScroll } = chartWindow
+
+  useEffect(() => {
+    setChartPan(Math.max(0, periodEnd - periodStart + 1 - MAX_CHART_WEEKS))
+  }, [periodStart, periodEnd])
 
   const selectedSite = useMemo(() => {
     if (!sitesDashboard || mode === 'all' || !siteId) return null
@@ -232,9 +245,9 @@ function SitesPage({ onNavigate }) {
     return matchingEntry ? aggregateHoursSeries([matchingEntry]) : []
   }, [selectedSite, sitesDashboard, siteId, mode])
 
-  const siteVolumeStats = windowStats(siteVolumeData, startIdx, endIdx)
-  const siteConsumptionStats = windowStats(siteConsumptionData, startIdx, endIdx, { ignoreZeros: true })
-  const siteHoursStats = windowStats(siteHoursData, startIdx, endIdx, { ignoreZeros: true })
+  const siteVolumeStats = windowStats(siteVolumeData, periodStart, periodEnd)
+  const siteConsumptionStats = windowStats(siteConsumptionData, periodStart, periodEnd, { ignoreZeros: true })
+  const siteHoursStats = windowStats(siteHoursData, periodStart, periodEnd, { ignoreZeros: true })
 
   const siteAutonomy = useMemo(() => {
     if (!sitesDashboard?.autonomyBySite || !siteId) return null
@@ -257,18 +270,20 @@ function SitesPage({ onNavigate }) {
       return {
         id: site.id,
         nom_site: site.nom_site,
-        volume: windowStats(volumeSeries, startIdx, endIdx),
-        consumption: windowStats(consumptionSeries, startIdx, endIdx, { ignoreZeros: true }),
-        hours: windowStats(hoursSeries, startIdx, endIdx, { ignoreZeros: true }),
+        volume: windowStats(volumeSeries, periodStart, periodEnd),
+        consumption: windowStats(consumptionSeries, periodStart, periodEnd, { ignoreZeros: true }),
+        hours: windowStats(hoursSeries, periodStart, periodEnd, { ignoreZeros: true }),
       }
     })
-  }, [sitesDashboard, startIdx, endIdx, siteId])
+  }, [sitesDashboard, periodStart, periodEnd, siteId])
 
   useEffect(() => {
     if (!window.Chart || !sitesDashboard || mode === 'all') return undefined
     const charts = []
-    const labels = (sitesDashboard.labels || []).slice(startIdx, endIdx + 1)
-    const sliceSeries = (values = []) => values.slice(startIdx, endIdx + 1)
+    const fullLabels = sitesDashboard.labels || []
+    const labels = toChartLabels(fullLabels.slice(viewStart, viewEnd + 1))
+    const fullLabelsWindow = fullLabels.slice(viewStart, viewEnd + 1)
+    const sliceSeries = (values = []) => values.slice(viewStart, viewEnd + 1)
     const pointRadius = seriesPointRadius(labels.length)
     const createLineChart = (id, data, color, fill = false) => {
       const ctx = document.getElementById(id)
@@ -293,7 +308,17 @@ function SitesPage({ onNavigate }) {
           responsive: true,
           maintainAspectRatio: false,
           spanGaps: true,
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              callbacks: {
+                title: (items) => {
+                  const idx = items?.[0]?.dataIndex
+                  return fullLabelsWindow[idx] != null ? String(fullLabelsWindow[idx]) : ''
+                },
+              },
+            },
+          },
           scales: {
             x: {
               ticks: xAxisTicks(labels.length, chartPalette.text),
@@ -312,8 +337,21 @@ function SitesPage({ onNavigate }) {
     createLineChart('chart-site-volume', siteVolumeData, '#0b3d7a', true)
     createLineChart('chart-site-hours', siteHoursData, '#3b82f6', true)
     createLineChart('chart-site-consumption', siteConsumptionData, '#60a5fa', true)
-    return () => charts.forEach((chart) => chart.destroy())
-  }, [chartPalette, sitesDashboard, selectedSite, siteVolumeData, siteHoursData, siteConsumptionData, startIdx, endIdx, mode])
+
+    const onWheel = (event) => {
+      if (!canScroll) return
+      event.preventDefault()
+      const step = event.deltaY > 0 ? 1 : -1
+      setChartPan((prev) => Math.min(maxPan, Math.max(0, prev + step)))
+    }
+    const chartBoxes = document.querySelectorAll('.chart-box')
+    chartBoxes.forEach((box) => box.addEventListener('wheel', onWheel, { passive: false }))
+
+    return () => {
+      charts.forEach((chart) => chart.destroy())
+      chartBoxes.forEach((box) => box.removeEventListener('wheel', onWheel))
+    }
+  }, [chartPalette, sitesDashboard, selectedSite, siteVolumeData, siteHoursData, siteConsumptionData, viewStart, viewEnd, mode, canScroll, maxPan])
 
   if (!sitesDashboard) {
     return (
@@ -452,7 +490,7 @@ function SitesPage({ onNavigate }) {
                     <div><span>Total sur la période de la courbe</span><strong>{siteHoursStats.total.toFixed(1)} h</strong>{renderDelta(siteHoursStats)}</div>
                     <div><span>Delta horaire moyen</span><strong>{siteHoursStats.mean.toFixed(1)} h</strong>{renderMeanDelta(siteHoursStats)}</div>
                   </div>
-                  <div className="chart-box secondary-box"><canvas id="chart-site-hours" /></div>
+                  <div className={`chart-box secondary-box${canScroll ? ' is-scrollable' : ''}`}><canvas id="chart-site-hours" /></div>
                 </article>
 
                 <article className="metric-panel site-metric-card">
@@ -462,7 +500,7 @@ function SitesPage({ onNavigate }) {
                     <div><span>Total sur la période de la courbe</span><strong>{siteConsumptionStats.total.toFixed(1)} L</strong>{renderDelta(siteConsumptionStats)}</div>
                     <div><span>Consommation moyenne</span><strong>{siteConsumptionStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteConsumptionStats)}</div>
                   </div>
-                  <div className="chart-box secondary-box"><canvas id="chart-site-consumption" /></div>
+                  <div className={`chart-box secondary-box${canScroll ? ' is-scrollable' : ''}`}><canvas id="chart-site-consumption" /></div>
                 </article>
 
                 <article className="metric-panel site-metric-card">
@@ -472,7 +510,7 @@ function SitesPage({ onNavigate }) {
                     <div><span>Stock semaine N (dernière valeur)</span><strong>{siteVolumeStats.latest.toFixed(1)} L</strong>{renderDelta(siteVolumeStats)}</div>
                     <div><span>Volume moyen</span><strong>{siteVolumeStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteVolumeStats)}</div>
                   </div>
-                  <div className="chart-box secondary-box"><canvas id="chart-site-volume" /></div>
+                  <div className={`chart-box secondary-box${canScroll ? ' is-scrollable' : ''}`}><canvas id="chart-site-volume" /></div>
                 </article>
               </div>
             </section>

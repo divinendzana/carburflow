@@ -457,6 +457,53 @@ def _parse_date(value: Any, *, row: int | None = None, column: str = 'date') -> 
     )
 
 
+def _swap_day_month(value: date) -> date | None:
+    """Échange jj↔mm si les deux sont ≤ 12 (ambiguïté Excel US vs FR)."""
+    if value.day > 12 or value.month > 12:
+        return None
+    if value.day == value.month:
+        return None
+    try:
+        return date(value.year, value.day, value.month)
+    except ValueError:
+        return None
+
+
+def coerce_french_week_period(
+    d1: date | None,
+    d2: date | None,
+    *,
+    max_days: int = 14,
+) -> tuple[date | None, date | None, bool]:
+    """
+    Corrige le cas Excel US : 03/08/2026 (3 août) lu comme 08/03/2026 (8 mars).
+
+    Si la période brute dépasse max_days, tente d’échanger jj/mm sur date_debut
+    (puis sur les deux dates) pour retrouver une semaine plausible.
+    """
+    if d1 is None or d2 is None:
+        return d1, d2, False
+    if d1 <= d2 and (d2 - d1).days <= max_days:
+        return d1, d2, False
+
+    candidates: list[tuple[int, date, date]] = []
+    swapped_debut = _swap_day_month(d1)
+    swapped_fin = _swap_day_month(d2)
+
+    if swapped_debut is not None:
+        if swapped_debut <= d2 and (d2 - swapped_debut).days <= max_days:
+            candidates.append((1, swapped_debut, d2))
+        if swapped_fin is not None and swapped_debut <= swapped_fin and (swapped_fin - swapped_debut).days <= max_days:
+            candidates.append((2, swapped_debut, swapped_fin))
+
+    if not candidates:
+        return d1, d2, False
+
+    candidates.sort(key=lambda item: (item[0], (item[2] - item[1]).days))
+    _, fixed_debut, fixed_fin = candidates[0]
+    return fixed_debut, fixed_fin, True
+
+
 def _to_float(value: Any, default: float = 0.0, *, row: int | None = None, column: str | None = None) -> float:
     if value is None or value == '':
         return default
@@ -606,9 +653,10 @@ def rows_from_csv(file_bytes: bytes) -> list[dict]:
     rows = []
     for raw in reader:
         row = normalize_row_keys({k: v for k, v in raw.items() if k})
-        if 'date_debut' in meta_info and not row.get('date_debut'):
+        # Meta CSV (# date_debut: ...) = seule source de vérité pour la période
+        if 'date_debut' in meta_info:
             row['date_debut'] = meta_info['date_debut']
-        if 'date_fin' in meta_info and not row.get('date_fin'):
+        if 'date_fin' in meta_info:
             row['date_fin'] = meta_info['date_fin']
         if not any(str(v or '').strip() for v in row.values()):
             continue
@@ -722,9 +770,10 @@ def rows_from_xlsx(file_bytes: bytes) -> list[dict]:
             else:
                 raw[key] = None
 
-        if 'date_debut' in meta_info and not raw.get('date_debut'):
+        # Entête = seule source de vérité pour la période (jamais une colonne par ligne)
+        if 'date_debut' in meta_info:
             raw['date_debut'] = meta_info['date_debut']
-        if 'date_fin' in meta_info and not raw.get('date_fin'):
+        if 'date_fin' in meta_info:
             raw['date_fin'] = meta_info['date_fin']
 
         normalized = normalize_row_keys(raw)

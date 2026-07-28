@@ -14,11 +14,8 @@ import re
 
 
 def format_rapport_label(report) -> str:
-    """Libellé chronologique lisible pour axes / filtres (avec année)."""
-    return (
-        f"{report.date_debut.strftime('%d/%m/%Y')} → "
-        f"{report.date_fin.strftime('%d/%m/%Y')}"
-    )
+    """Libellé période pour filtres / axes : date de début (jj/mm/aaaa)."""
+    return report.date_debut.strftime('%d/%m/%Y')
 
 
 def ordered_rapports(queryset=None):
