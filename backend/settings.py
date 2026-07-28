@@ -77,7 +77,7 @@ DATABASES = {
     }
 }
 
-# Mots de passe démo (admin123 / user123) autorisés en développement
+# Mots de passe démo (admin / user123) autorisés en développement
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',

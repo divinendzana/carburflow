@@ -177,7 +177,7 @@ function AuthPage({ onNavigate, initialMode = 'login' }) {
                 type="button"
                 variant="outline"
                 size="sm"
-                onClick={() => fillDemoInputs('admin', 'admin123')}
+                onClick={() => fillDemoInputs('admin', 'admin')}
               >
                 Démo admin
               </Button>

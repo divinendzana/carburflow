@@ -17,10 +17,12 @@ class CuvePrincipaleSerializer(serializers.ModelSerializer):
 class CuveJournaliereSerializer(serializers.ModelSerializer):
     class Meta:
         model = CuveJournaliere
-        fields = ['id', 'cuve_principale', 'capacite', 'groupe_electrogene']
+        fields = ['id', 'identifiant', 'cuve_principale', 'capacite', 'groupe_electrogene']
 
 
 class GroupeElectrogeneSerializer(serializers.ModelSerializer):
+    compteur_horaire = serializers.SerializerMethodField()
+
     class Meta:
         model = GroupeElectrogene
         fields = [
@@ -30,6 +32,15 @@ class GroupeElectrogeneSerializer(serializers.ModelSerializer):
             'marque',
             'puissance',
         ]
+
+    def get_compteur_horaire(self, obj):
+        from dashboard.models import LigneRapport
+        last = (
+            LigneRapport.objects.filter(groupe_electrogene=obj, compteur_horaire__isnull=False)
+            .order_by('-rapport__date_fin', '-id')
+            .first()
+        )
+        return last.compteur_horaire if last and last.compteur_horaire is not None else 0.0
 
 
 class RapportSerializer(serializers.ModelSerializer):

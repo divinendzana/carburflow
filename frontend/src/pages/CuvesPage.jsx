@@ -100,6 +100,7 @@ function CuvesPage({ onNavigate }) {
     const baseOptions = (unit = 'L') => ({
       responsive: true,
       maintainAspectRatio: false,
+<<<<<<< HEAD
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -121,6 +122,10 @@ function CuvesPage({ onNavigate }) {
           },
         },
       },
+=======
+      spanGaps: true,
+      plugins: { legend: { display: false } },
+>>>>>>> d2b7279f27938bd4c7bf270e0c7bd8e4f533c608
       scales: {
         x: { ticks: { color: chartPalette.text }, grid: { color: chartPalette.grid } },
         y: {
@@ -163,11 +168,16 @@ function CuvesPage({ onNavigate }) {
             borderWidth: 3,
             tension: 0.3,
             fill: true,
+<<<<<<< HEAD
             pointRadius: 0,
             pointBackgroundColor: baseColor,
             pointHoverRadius: 6,
             pointHoverBorderWidth: 2,
             pointHoverBackgroundColor: '#fff',
+=======
+            pointRadius: 4,
+            spanGaps: true,
+>>>>>>> d2b7279f27938bd4c7bf270e0c7bd8e4f533c608
           }],
         },
         options: baseOptions(unit),

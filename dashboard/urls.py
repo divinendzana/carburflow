@@ -15,6 +15,7 @@ from dashboard.auth_views import (
     RegisterAPIView,
 )
 from dashboard.rapport_views import (
+    GenererRapportHebdoAPIView,
     MesRapportsAPIView,
     NormeCsvAPIView,
     NormeMetaAPIView,
@@ -57,6 +58,7 @@ urlpatterns = [
     path('rapports/norme', NormeMetaAPIView.as_view(), name='api-norme-meta'),
     path('rapports/norme.csv', NormeCsvAPIView.as_view(), name='api-norme-csv'),
     path('rapports/norme.xlsx', NormeXlsxAPIView.as_view(), name='api-norme-xlsx'),
+    path('rapports/generer.xlsx', GenererRapportHebdoAPIView.as_view(), name='api-rapports-generer-xlsx'),
     path('rapports/upload', RapportUploadAPIView.as_view(), name='api-rapport-upload'),
     path('rapports/mes', MesRapportsAPIView.as_view(), name='api-rapports-mes'),
     path('rapports/soumissions', SoumissionsAPIView.as_view(), name='api-rapports-soumissions'),

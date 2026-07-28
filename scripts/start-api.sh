@@ -15,7 +15,7 @@ fi
 
 echo "→ Migrations…"
 "$PY" manage.py migrate --noinput
-echo "→ Comptes démo (admin/admin123, user/user123)…"
+echo "→ Comptes démo (admin/admin, user/user123)…"
 "$PY" manage.py seed_accounts
 echo "→ API sur http://127.0.0.1:8001/"
 exec "$PY" manage.py runserver 8001

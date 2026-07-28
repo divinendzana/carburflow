@@ -4,12 +4,13 @@ from django.core.management import call_command
 from django.core.management.base import BaseCommand
 
 from dashboard.models import (
-    CuvePrincipale,
     CuveJournaliere,
+    CuvePrincipale,
     GroupeElectrogene,
-    Rapport,
     LigneRapport,
+    Rapport,
 )
+from dashboard.sequence_utils import reset_sqlite_sequences
 
 
 class Command(BaseCommand):
@@ -44,15 +45,15 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.WARNING('Suppression des données existantes...'))
 
-        # Ordre de suppression respectant les contraintes de clés étrangères
         LigneRapport.objects.all().delete()
         Rapport.objects.all().delete()
         CuveJournaliere.objects.all().delete()
         GroupeElectrogene.objects.all().delete()
         CuvePrincipale.objects.all().delete()
 
-        self.stdout.write(self.style.SUCCESS('✔ Données supprimées'))
+        self.stdout.write(self.style.SUCCESS('Données supprimées'))
+        reset_sqlite_sequences('dashboard')
 
         self.stdout.write(self.style.NOTICE(f'Importation depuis : {data_dir}'))
-        call_command('import', dir=str(data_dir), stdout=self.stdout, stderr=self.stderr)
+        call_command('import_csv', dir=str(data_dir), stdout=self.stdout, stderr=self.stderr)
         self.stdout.write(self.style.SUCCESS('Réinitialisation et importation terminées avec succès !'))

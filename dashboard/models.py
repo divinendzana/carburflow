@@ -50,7 +50,6 @@ class CuvePrincipale(models.Model):
 
 class GroupeElectrogene(models.Model):
     identifiant = models.CharField(max_length=100, unique=True)
-    compteur_horaire = models.FloatField()
     marque = models.CharField(max_length=100)
     puissance = models.CharField(max_length=100)
 
@@ -60,7 +59,7 @@ class GroupeElectrogene(models.Model):
 
 class CuveJournaliere(models.Model):
     # Nom terrain (fiche de suivi), ex. "BEPANDA NATIONAL 1"
-    identifiant = models.CharField(max_length=100, unique=True, null=True, blank=True)
+    identifiant = models.CharField(max_length=100, unique=True)
     capacite = models.FloatField()
     cuve_principale = models.ForeignKey(
         CuvePrincipale,
@@ -97,7 +96,7 @@ class Rapport(models.Model):
     class Meta:
         verbose_name = 'Rapport'
         verbose_name_plural = 'Rapports'
-        ordering = ['date_debut', 'id']
+        ordering = ['date_debut', 'date_fin', 'id']
 
     def __str__(self):
         return f'Rapport du {self.date_debut} au {self.date_fin}'

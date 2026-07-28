@@ -251,13 +251,10 @@ def calculer_groupes(
             weighted_report_delta = round(site_delta * group_share, 1)
             consumed_deltas.append(weighted_report_delta)
 
-            # Calcule le volume restant (non utilisé directement mais conservé pour l'historique)
+            # Calcule le volume restant pour ce groupe (part du volume total du site actuel)
             site_current_volume = float(site_state.get('current_volume', 0.0) or 0.0)
             weighted_report_volume = round(site_current_volume * group_share, 1)
-            volume_value = weighted_report_volume if previous_volume is None else round(previous_volume + weighted_report_delta, 1)
-            volume.append(volume_value)
-            previous_volume = volume_value
-            weighted_volumes.append(weighted_report_volume)
+            volume.append(weighted_report_volume)
 
 
         # 3. Calculer les métriques finales (consommation horaire, autonomie)
@@ -332,7 +329,6 @@ def calculer_groupes(
             'site_nom': next((site.identifiant for site in sites if site.id == primary_site_id), ''),
             'hours_run': hours_run,
             'volume': volume,
-            'weighted_volume': weighted_volumes,
             'consumption': consumed_deltas,
             'mean_hourly_consumption': round(mean_hourly_consumption, 3),  # ratio des sommes (autonomie)
             'mean_hourly_consumption_deduite': round(mean_hourly_consumption_deduite, 3),  # moyenne des ratios (affichage)

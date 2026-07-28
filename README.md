@@ -1,10 +1,10 @@
 # CarburFlow
 
-CarburFlow est une application web full-stack conçue pour le suivi et la gestion de la consommation de carburant. Elle dispose d'un backend en Django pour la gestion des données et d'une interface utilisateur réactive en React.
+CarburFlow est une application web conçue pour le suivi et la gestion de la consommation de carburant. Elle dispose d'un backend en **Django** pour la gestion des données et d'une interface utilisateur réactive en **React**.
 
 ## Technologies utilisées
 
-- **Backend**:
+- **Backend** :
   - Python
   - Django & Django REST Framework
 - **Frontend**:
@@ -12,7 +12,7 @@ CarburFlow est une application web full-stack conçue pour le suivi et la gestio
   - Tailwind CSS
 - **Base de données**:
   - SQLite (par défaut avec Django)
-
+  - PostgreSQL (recommandé pour la production)
 ---
 
 ## Prérequis
@@ -20,7 +20,7 @@ CarburFlow est une application web full-stack conçue pour le suivi et la gestio
 Avant de commencer, assurez-vous d'avoir les outils suivants installés sur votre machine :
 - [Python 3.8+](https://www.python.org/downloads/)
 - [Node.js >= 18](https://nodejs.org/) (et npm)
-
+- Un terminal compatible Bash (comme Git Bash sur Windows)
 ---
 
 ## Installation et Lancement

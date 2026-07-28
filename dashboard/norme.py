@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from django.db import transaction
@@ -28,12 +28,59 @@ NORME_COLUMNS = [
     'observations',
 ]
 
+# Colonne utilisée pour l’export d’un rapport déjà importé, afin de refléter
+# exactement la forme de la fiche de saisie / modèle initial sans les dates.
+EXPORT_COLUMNS = [
+    'id_cuve_journaliere',
+    'site',
+    'groupe_marque',
+    'quantite_cuve_principale',
+    'quantite_cuve_journaliere',
+    'depotage',
+    'compteur_horaire',
+    'etat_fonctionnement',
+    'observations',
+]
+
 # Alias acceptés à la lecture (anciens modèles / variantes sans accents).
 COLUMN_ALIASES = {
+    'code_cuve_journaliere': 'id_cuve_journaliere',
+    'code cuve (verrouille)': 'id_cuve_journaliere',
+    'code cuve (verrouillee)': 'id_cuve_journaliere',
+    'code_cj': 'id_cuve_journaliere',
+    'code_cuve': 'id_cuve_journaliere',
+    'code': 'id_cuve_journaliere',
+    'cuve journaliere (verrouille)': 'id_cuve_journaliere',
+    'cuve journaliere (verrouillee)': 'id_cuve_journaliere',
+    'cuve journaliere (laisser vide)': 'id_cuve_journaliere',
+    'site / cuve principale': 'id_cuve_principale',
+    'nom du nouveau site': 'id_cuve_principale',
+    'groupe électrogène': 'id_groupe',
+    'groupe electrogene': 'id_groupe',
+    'quantité cp (l)': 'quantités_cuve_principale',
+    'quantite cp (l)': 'quantités_cuve_principale',
+    'quantité cj (l)': 'quantite_cuve_journaliere',
+    'nom_site': 'id_cuve_principale',
+    'nom_site_saisi': 'id_cuve_principale',
+    'site': 'id_cuve_principale',
+    'groupe / marque': 'id_groupe',
+    'groupe_marque': 'id_groupe',
+    'groupe': 'id_groupe',
+    'marque groupe': 'marque_groupe',
+    'puissance groupe': 'puissance_groupe',
+    'code site existant (opt.)': 'code_site_existant',
+    'capacite cp (l)': 'capacite_cp',
+    'capacité cp (l)': 'capacite_cp',
+    'capacite cj (l)': 'capacite_cj',
+    'capacité cj (l)': 'capacite_cj',
     'quantite_gasoil_cuve_principale': 'quantités_cuve_principale',
     'quantites_cuve_principale': 'quantités_cuve_principale',
     'quantite_cuve_principale': 'quantités_cuve_principale',
     'quantite_gasoil_cuve_journaliere': 'quantite_cuve_journaliere',
+    'quantite cj (l)': 'quantite_cuve_journaliere',
+    'depotage (l)': 'depotage',
+    'compteur horaire': 'compteur_horaire',
+    'etat (f/p/hs)': 'état_fonctionnement',
     'etat_fonctionnement': 'état_fonctionnement',
     'etat': 'état_fonctionnement',
 }
@@ -73,7 +120,41 @@ def normalize_row_keys(row: dict) -> dict:
         # Première occurrence gagne (évite d’écraser une valeur déjà canonique)
         if canon not in out or (out[canon] in (None, '') and value not in (None, '')):
             out[canon] = value
+
+    # Zone « nouveaux sites » : CJ = site si vide ; marque/puissance restent séparés
+    # (l’identifiant G{n}-MARQUE-PUISSANCE est composé par l’appli à la création).
+    site = out.get('id_cuve_principale')
+    cj = out.get('id_cuve_journaliere')
+    if (not cj or str(cj).strip() == '') and site and str(site).strip():
+        out['id_cuve_journaliere'] = str(site).strip()
+
     return out
+
+
+def _is_section_separator(values) -> bool:
+    first = str(values[0] if values and len(values) > 0 else '').strip()
+    return first.startswith('---') or 'CARBURFLOW' in first.upper()
+
+
+def _is_header_row(values) -> bool:
+    """Détecte une ligne d’en-têtes (relevés ou zone nouveaux sites)."""
+    cells = [str(v or '').strip().lower() for v in (values or []) if v is not None and str(v).strip()]
+    if not cells:
+        return False
+    joined = ' | '.join(cells)
+    markers = (
+        'cuve journal',
+        'nouveau site',
+        'site / cuve',
+        'groupe',
+        'quantite',
+        'quantité',
+        'depotage',
+        'dépotage',
+        'observations',
+    )
+    hits = sum(1 for m in markers if m in joined)
+    return hits >= 2
 
 
 NORME_META = {
@@ -226,7 +307,7 @@ def build_xlsx_bytes(include_sample: bool = True) -> bytes:
 
 
 def rapport_to_rows(rapport: Rapport) -> list[dict]:
-    """Reconstitue les lignes au format fiche de suivi pour export."""
+    """Reconstitue les lignes au format de la fiche de saisie pour export."""
     rows = []
     lignes = rapport.lignes.select_related(
         'cuve_principale',
@@ -234,17 +315,25 @@ def rapport_to_rows(rapport: Rapport) -> list[dict]:
         'groupe_electrogene',
     ).all()
     for ligne in lignes:
+        groupe_display = ''
+        if ligne.groupe_electrogene_id:
+            ge = ligne.groupe_electrogene
+            marque = getattr(ge, 'marque', None)
+            groupe_display = (
+                f'{ge.identifiant} ({marque})'
+                if marque
+                else ge.identifiant
+            )
+
         rows.append({
-            'date_debut': rapport.date_debut.isoformat() if rapport.date_debut else '',
-            'date_fin': rapport.date_fin.isoformat() if rapport.date_fin else '',
-            'id_cuve_principale': (
+            'id_cuve_journaliere': (
+                ligne.cuve_journaliere.identifiant if ligne.cuve_journaliere_id else ''
+            ),
+            'site': (
                 ligne.cuve_principale.identifiant if ligne.cuve_principale_id else ''
             ),
-            'id_cuve_journaliere': (
-                (ligne.cuve_journaliere.identifiant or '') if ligne.cuve_journaliere_id else ''
-            ),
-            'id_groupe': ligne.groupe_electrogene_id or '',
-            'quantités_cuve_principale': ligne.quantite_gasoil_cuve_principale
+            'groupe_marque': groupe_display,
+            'quantite_cuve_principale': ligne.quantite_gasoil_cuve_principale
             if ligne.quantite_gasoil_cuve_principale is not None
             else '',
             'quantite_cuve_journaliere': ligne.quantite_gasoil_cuve_journaliere
@@ -252,7 +341,7 @@ def rapport_to_rows(rapport: Rapport) -> list[dict]:
             else '',
             'depotage': ligne.depotage if ligne.depotage is not None else '',
             'compteur_horaire': ligne.compteur_horaire if ligne.compteur_horaire is not None else '',
-            'état_fonctionnement': ligne.etat_fonctionnement or '',
+            'etat_fonctionnement': ligne.etat_fonctionnement or '',
             'observations': ligne.observations or '',
         })
     return rows
@@ -260,10 +349,17 @@ def rapport_to_rows(rapport: Rapport) -> list[dict]:
 
 def build_rapport_csv_bytes(rapport: Rapport) -> bytes:
     buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=NORME_COLUMNS, lineterminator='\n')
+    buffer.write('# CARBURFLOW — RAPPORT IMPORTÉ\n')
+    buffer.write(f"# date_debut: {rapport.date_debut.strftime('%d/%m/%Y') if rapport.date_debut else ''}\n")
+    buffer.write(f"# date_fin: {rapport.date_fin.strftime('%d/%m/%Y') if rapport.date_fin else ''}\n")
+    buffer.write(f"# rapport_id: {rapport.id}\n")
+    if rapport.created_by_id:
+        buffer.write(f"# created_by: {rapport.created_by.get_username()}\n")
+    buffer.write('# colonnes: ' + ', '.join(EXPORT_COLUMNS) + '\n')
+    writer = csv.DictWriter(buffer, fieldnames=EXPORT_COLUMNS, lineterminator='\n')
     writer.writeheader()
     for row in rapport_to_rows(rapport):
-        writer.writerow(row)
+        writer.writerow({col: row.get(col, '') for col in EXPORT_COLUMNS})
     return buffer.getvalue().encode('utf-8-sig')
 
 
@@ -271,19 +367,22 @@ def build_rapport_xlsx_bytes(rapport: Rapport) -> bytes:
     from openpyxl import Workbook
 
     wb = Workbook()
-    ws = wb.active
-    ws.title = 'Rapport'
-    ws.append(NORME_COLUMNS)
-    for row in rapport_to_rows(rapport):
-        ws.append([row.get(col, '') for col in NORME_COLUMNS])
 
-    meta = wb.create_sheet('Meta')
-    meta.append(['champ', 'valeur'])
-    meta.append(['rapport_id', rapport.id])
-    meta.append(['date_debut', str(rapport.date_debut)])
-    meta.append(['date_fin', str(rapport.date_fin)])
+    ws_meta = wb.active
+    ws_meta.title = 'Entête'
+    ws_meta.append(['CARBURFLOW — RAPPORT IMPORTÉ'])
+    ws_meta.append([])
+    ws_meta.append(['champ', 'valeur'])
+    ws_meta.append(['rapport_id', rapport.id])
+    ws_meta.append(['date_debut', str(rapport.date_debut)])
+    ws_meta.append(['date_fin', str(rapport.date_fin)])
     if rapport.created_by_id:
-        meta.append(['created_by', rapport.created_by.get_username()])
+        ws_meta.append(['created_by', rapport.created_by.get_username()])
+
+    ws = wb.create_sheet(title='Relevés')
+    ws.append(EXPORT_COLUMNS)
+    for row in rapport_to_rows(rapport):
+        ws.append([row.get(col, '') for col in EXPORT_COLUMNS])
 
     out = io.BytesIO()
     wb.save(out)
@@ -333,6 +432,11 @@ def _parse_date(value: Any, *, row: int | None = None, column: str = 'date') -> 
         return value.date()
     if isinstance(value, date):
         return value
+    # Numéro de série Excel (ex. 46237 = 03/08/2026) — évite les ambiguïtés locale jj/mm
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        serial = float(value)
+        if 20000 <= serial <= 80000:  # ~1954 → ~2119
+            return (datetime(1899, 12, 30) + timedelta(days=serial)).date()
     text = str(value).strip()
     for fmt in ('%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y'):
         try:
@@ -431,10 +535,29 @@ def _missing_required_columns(headers: list[str]) -> list[dict]:
 
 def _detect_csv_delimiter(sample: str) -> str:
     """Détecte ; ou , (Excel FR utilise souvent ;)."""
-    first_line = (sample.splitlines() or [''])[0]
-    if first_line.count(';') >= first_line.count(','):
+    lines = [line.strip() for line in sample.splitlines() if line.strip()]
+    candidate_lines = [line for line in lines if not line.startswith('#')]
+    if not candidate_lines:
+        return ','
+    first_line = candidate_lines[0]
+    if first_line.count(';') > first_line.count(','):
         return ';'
     return ','
+
+
+def _extract_csv_meta(text: str) -> dict:
+    meta: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line.startswith('#'):
+            continue
+        if ':' not in line:
+            continue
+        key, value = line[1:].split(':', 1)
+        key = canonicalize_header(key.strip())
+        if key in {'date_debut', 'date_fin', 'rapport_id', 'created_by', 'colonnes'}:
+            meta[key] = value.strip()
+    return meta
 
 
 def rows_from_csv(file_bytes: bytes) -> list[dict]:
@@ -452,8 +575,11 @@ def rows_from_csv(file_bytes: bytes) -> list[dict]:
                 )
             ],
         ) from exc
+    meta_info = _extract_csv_meta(text)
     delimiter = _detect_csv_delimiter(text)
-    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter)
+    lines = [line for line in text.splitlines() if not line.lstrip().startswith('#')]
+    cleaned_text = '\n'.join(lines)
+    reader = csv.DictReader(io.StringIO(cleaned_text), delimiter=delimiter)
     if not reader.fieldnames:
         raise ImportValidationError(
             'Le fichier CSV est vide ou sans titres de colonnes.',
@@ -467,6 +593,10 @@ def rows_from_csv(file_bytes: bytes) -> list[dict]:
             ],
         )
     headers = _normalize_headers(reader.fieldnames)
+    if 'date_debut' in meta_info and 'date_debut' not in headers:
+        headers.append('date_debut')
+    if 'date_fin' in meta_info and 'date_fin' not in headers:
+        headers.append('date_fin')
     missing_errors = _missing_required_columns(headers)
     if missing_errors:
         raise ImportValidationError(
@@ -476,6 +606,10 @@ def rows_from_csv(file_bytes: bytes) -> list[dict]:
     rows = []
     for raw in reader:
         row = normalize_row_keys({k: v for k, v in raw.items() if k})
+        if 'date_debut' in meta_info and not row.get('date_debut'):
+            row['date_debut'] = meta_info['date_debut']
+        if 'date_fin' in meta_info and not row.get('date_fin'):
+            row['date_fin'] = meta_info['date_fin']
         if not any(str(v or '').strip() for v in row.values()):
             continue
         rows.append(row)
@@ -499,39 +633,108 @@ def rows_from_xlsx(file_bytes: bytes) -> list[dict]:
                 )
             ],
         ) from exc
-    ws = wb[wb.sheetnames[0]]
-    rows_iter = ws.iter_rows(values_only=True)
-    try:
-        header_row = next(rows_iter)
-    except StopIteration as exc:
+
+    meta_info = {}
+    # Extrait les métadonnées de la feuille Entête / Meta si présente
+    for meta_sheet_name in ('Entête', 'Entete', 'Meta'):
+        if meta_sheet_name in wb.sheetnames:
+            ws_meta = wb[meta_sheet_name]
+            for row in ws_meta.iter_rows(values_only=True):
+                if row and len(row) >= 2 and row[0] is not None:
+                    k = canonicalize_header(str(row[0]))
+                    if k:
+                        meta_info[k] = row[1]
+            break
+
+    # Sélectionne la feuille de données (Relevés, Rapport ou la première feuille si non trouvée)
+    data_sheet_name = None
+    for target in ('Relevés', 'Releves', 'Rapport'):
+        if target in wb.sheetnames:
+            data_sheet_name = target
+            break
+    if not data_sheet_name:
+        non_meta = [name for name in wb.sheetnames if name not in ('Entête', 'Entete', 'Meta')]
+        data_sheet_name = non_meta[0] if non_meta else wb.sheetnames[0]
+
+    ws = wb[data_sheet_name]
+    all_rows = list(ws.iter_rows(values_only=True))
+
+    headers = []
+    start_idx = 0
+    for i, row_vals in enumerate(all_rows):
+        if not row_vals or all(v is None or str(v).strip() == '' for v in row_vals):
+            continue
+        if _is_section_separator(row_vals):
+            continue
+        headers = _normalize_headers(list(row_vals))
+        start_idx = i + 1
+        break
+
+    if not headers:
         raise ImportValidationError(
             'Le fichier Excel est vide.',
             [
                 _friendly_error(
                     row=1,
                     column=None,
-                    message='Aucune ligne trouvée dans la première feuille.',
-                    how_to_fix='Utilisez le modèle de l’étape 1 et ajoutez vos lignes sous les titres.',
+                    message='Aucune ligne d’en-tête trouvée dans la feuille de relevés.',
+                    how_to_fix='Utilisez la fiche de relevé hebdomadaire générée.',
                 )
             ],
-        ) from exc
-    headers = _normalize_headers(list(header_row))
+        )
+
+    if 'date_debut' in meta_info and 'date_debut' not in headers:
+        headers.append('date_debut')
+    if 'date_fin' in meta_info and 'date_fin' not in headers:
+        headers.append('date_fin')
+
     missing_errors = _missing_required_columns(headers)
     if missing_errors:
         raise ImportValidationError(
             'Il manque des colonnes obligatoires dans votre fichier.',
             missing_errors,
         )
+
     rows = []
-    for values in rows_iter:
+    for values in all_rows[start_idx:]:
         if values is None or all(v is None or str(v).strip() == '' for v in values):
             continue
+        if _is_section_separator(values):
+            continue
+        # Nouvelle zone = nouveaux en-têtes (ex. « Nom du Nouveau Site ») :
+        # basculer le mapping au lieu de réutiliser les colonnes des anciens relevés.
+        if _is_header_row(values):
+            headers = _normalize_headers(list(values))
+            if 'date_debut' in meta_info and 'date_debut' not in headers:
+                headers.append('date_debut')
+            if 'date_fin' in meta_info and 'date_fin' not in headers:
+                headers.append('date_fin')
+            continue
+
         raw = {}
         for idx, key in enumerate(headers):
             if not key:
                 continue
-            raw[key] = values[idx] if idx < len(values) else None
-        rows.append(normalize_row_keys(raw))
+            if idx < len(values):
+                raw[key] = values[idx]
+            elif key in meta_info:
+                raw[key] = meta_info[key]
+            else:
+                raw[key] = None
+
+        if 'date_debut' in meta_info and not raw.get('date_debut'):
+            raw['date_debut'] = meta_info['date_debut']
+        if 'date_fin' in meta_info and not raw.get('date_fin'):
+            raw['date_fin'] = meta_info['date_fin']
+
+        normalized = normalize_row_keys(raw)
+        if any(
+            v is not None and str(v).strip() != ''
+            for k, v in normalized.items()
+            if k not in ('date_debut', 'date_fin', 'capacite_cp', 'capacite_cj', 'code_site_existant')
+        ):
+            rows.append(normalized)
+
     return rows
 
 

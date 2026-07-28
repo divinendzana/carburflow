@@ -6,6 +6,7 @@ import PageEnter from '../components/PageEnter.jsx'
 import { useAuth } from '../context/AuthContext.jsx'
 import {
   deleteRapport,
+  downloadFicheHebdo,
   downloadNorme,
   downloadRapport,
   listMesRapports,
@@ -146,6 +147,7 @@ function ReportsPage({ onNavigate }) {
   const [dragging, setDragging] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [uploadName, setUploadName] = useState('')
+  const [downloadingFiche, setDownloadingFiche] = useState(false)
   const [downloadingNorme, setDownloadingNorme] = useState('')
   const [downloadingRapport, setDownloadingRapport] = useState('')
   const [message, setMessage] = useState('')
@@ -160,6 +162,7 @@ function ReportsPage({ onNavigate }) {
   const [deletingRapportId, setDeletingRapportId] = useState(null)
 
   const busy = uploading
+    || downloadingFiche
     || Boolean(downloadingNorme)
     || Boolean(downloadingRapport)
     || deletingRapportId != null
@@ -226,6 +229,19 @@ function ReportsPage({ onNavigate }) {
     setError('')
     setMessage('')
     setImportErrors([])
+  }
+
+  const handleDownloadFicheHebdo = async () => {
+    clearFeedback()
+    setDownloadingFiche(true)
+    try {
+      await downloadFicheHebdo()
+      setMessage('Fiche de relevé de la semaine générée avec succès. Complétez uniquement les valeurs mesurées, puis déposez le fichier à l’étape 3.')
+    } catch (err) {
+      setError(err.message || 'Impossible de générer la fiche de la semaine.')
+    } finally {
+      setDownloadingFiche(false)
+    }
   }
 
   const handleDownloadNorme = async (format) => {
@@ -304,17 +320,19 @@ function ReportsPage({ onNavigate }) {
       <Topbar activeView="reports" onNavigate={onNavigate} />
       <PageEnter>
       <main className="reports-layout reports-layout--simple">
-        {(uploading || downloadingNorme || downloadingRapport) && (
+        {(uploading || downloadingFiche || downloadingNorme || downloadingRapport) && (
           <div className="reports-toast-loading" role="status" aria-live="polite">
             <Spinner size={22} />
             <div>
               <strong>
                 {uploading && 'Envoi du fichier…'}
+                {downloadingFiche && 'Génération de la fiche hebdomadaire…'}
                 {downloadingNorme && 'Préparation du modèle…'}
                 {downloadingRapport && 'Préparation du téléchargement…'}
               </strong>
               <p>
                 {uploading && (uploadName ? `Fichier : ${uploadName}` : 'Vérification en cours')}
+                {downloadingFiche && 'Fichier Excel pré-rempli en cours de préparation…'}
                 {downloadingNorme && 'Quelques secondes…'}
                 {downloadingRapport && 'Votre fichier arrive…'}
               </p>
@@ -337,29 +355,29 @@ function ReportsPage({ onNavigate }) {
           <h2>
             {isAdmin
               ? 'Recevoir et corriger les fichiers'
-              : 'Envoyer mon fichier de relevé'}
+              : 'Générer et envoyer ma fiche de relevé'}
           </h2>
           <p>
             {isAdmin
-              ? 'Téléchargez le modèle si besoin, puis suivez les envois des opérateurs. Vous pouvez aussi corriger un rapport déjà reçu.'
-              : 'Remplissez le modèle, déposez-le ici, puis corrigez-le si besoin depuis la liste plus bas.'}
+              ? 'Générez les fiches hebdomadaires pré-remplies et suivez les envois des équipes.'
+              : 'Générez la fiche pré-remplie de la semaine, indiquez les valeurs mesurées, puis déposez-la ici.'}
           </p>
         </section>
 
         <section className="reports-howto" aria-label="Comment faire">
           <article className="reports-howto-card">
             <div className="reports-howto-num">1</div>
-            <h2>Récupérer le modèle</h2>
-            <p>Téléchargez le fichier prêt à remplir. C’est le bon format pour CarburFlow.</p>
+            <h2>Générer la fiche</h2>
+            <p>Obtenez le fichier Excel pré-rempli avec la liste de tous vos sites et groupes existants.</p>
             <div className="reports-download-row">
               <LoadingButton
                 className="reports-btn--primary reports-btn--lg"
-                loading={downloadingNorme === 'xlsx'}
-                loadingText="Téléchargement…"
-                disabled={busy && downloadingNorme !== 'xlsx'}
-                onClick={() => handleDownloadNorme('xlsx')}
+                loading={downloadingFiche}
+                loadingText="Génération…"
+                disabled={busy}
+                onClick={handleDownloadFicheHebdo}
               >
-                Télécharger le modèle Excel
+                Générer la fiche de cette semaine
               </LoadingButton>
               <LoadingButton
                 className="reports-btn--ghost"
@@ -368,64 +386,22 @@ function ReportsPage({ onNavigate }) {
                 disabled={busy && downloadingNorme !== 'csv'}
                 onClick={() => handleDownloadNorme('csv')}
               >
-                Ou en CSV
+                Ou modèle CSV historique
               </LoadingButton>
             </div>
           </article>
 
           <article className="reports-howto-card">
             <div className="reports-howto-num">2</div>
-            <h2>Remplir le fichier</h2>
+            <h2>Remplir les relevés</h2>
             <p>
-              Ouvrez le modèle, <strong>gardez les titres tels quels</strong>,
-              et remplacez la ligne d’exemple par vos relevés.
-              Une ligne = une cuve / un groupe pour la période.
+              Ouvrez le fichier Excel. Les noms de sites et groupes sont <strong>verrouillés</strong> pour éviter les erreurs de frappe.
             </p>
             <ul className="reports-plain-list">
-              <li>Mettez les mêmes dates de début et de fin sur toutes les lignes.</li>
-              <li>Utilisez les numéros de cuves et de groupes déjà connus dans l’application.</li>
-              <li>Les litres et le compteur se remplissent avec des nombres simples.</li>
+              <li>Saisissez uniquement vos mesures (quantités de gasoil, dépotage, compteur horaire).</li>
+              <li>Sélectionnez l’état de fonctionnement dans la liste déroulante (F / P / HS).</li>
+              <li>Pour ajouter un site non répertorié, utilisez la section basse dédiée dans l’Excel.</li>
             </ul>
-
-            <button
-              type="button"
-              className="reports-linkish"
-              onClick={() => setShowAllColumns((v) => !v)}
-            >
-              {showAllColumns ? 'Masquer le détail des colonnes' : 'Voir quoi mettre dans chaque colonne'}
-            </button>
-
-            {showAllColumns && (
-              <div className="reports-table-wrap reports-guide-table">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Nom dans le fichier</th>
-                      <th>En français</th>
-                      <th>Que mettre ?</th>
-                      <th>Exemple</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleColumns.map((col) => (
-                      <tr key={col.name}>
-                        <td><code>{col.name}</code></td>
-                        <td>
-                          <strong>{col.label}</strong>
-                          {col.required ? (
-                            <div className="reports-need">Obligatoire</div>
-                          ) : (
-                            <div className="reports-optional">Facultatif</div>
-                          )}
-                        </td>
-                        <td>{col.help}</td>
-                        <td>{col.example}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
           </article>
 
           <article className="reports-howto-card">
