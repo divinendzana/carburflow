@@ -10,9 +10,23 @@ import re
 import statistics
 
 
+
 def extraire_puissance(value):
     """
     Extrait la valeur numérique d'une chaîne de caractères représentant la puissance.
+
+def format_rapport_label(report) -> str:
+    """Libellé période pour filtres / axes : date de début (jj/mm/aaaa)."""
+    return report.date_debut.strftime('%d/%m/%Y')
+
+
+def ordered_rapports(queryset=None):
+    """Liste des rapports en ordre chronologique strict."""
+    from dashboard.models import Rapport
+
+    qs = queryset if queryset is not None else Rapport.objects.all()
+    return list(qs.order_by('date_debut', 'date_fin', 'id'))
+
 
     Args:
         value (str or None): La chaîne de caractères (ex: "100 kVA").

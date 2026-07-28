@@ -6,7 +6,7 @@ import AutonomyBadge from '../components/AutonomyBadge.jsx'
 import PageLoader from '../components/PageLoader.jsx'
 import PageEnter from '../components/PageEnter.jsx'
 import { useChartPalette } from '../hooks/useChartPalette.js'
-import { createChart, seriesPointRadius, xAxisTicks } from '../utils/chartAxis.js'
+import { createChart, defaultPeriodIndices, MAX_CHART_WEEKS, seriesPointRadius, toChartLabels, visibleChartRange, xAxisTicks } from '../utils/chartAxis.js'
 import { formatAutonomyValue, getAutonomySeverity } from '../utils/format.js'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 
@@ -17,6 +17,7 @@ function SitesPage({ onNavigate }) {
   const [startIdx, setStartIdx] = useState(0)
   const [endIdx, setEndIdx] = useState(0)
   const [siteId, setSiteId] = useState('')
+  const [chartPan, setChartPan] = useState(0)
   const querySiteId = useMemo(() => new URLSearchParams(window.location.search).get('siteId'), [])
   const querySiteName = useMemo(() => new URLSearchParams(window.location.search).get('siteName'), [])
   const queryMode = useMemo(() => new URLSearchParams(window.location.search).get('mode'), [])
@@ -159,11 +160,23 @@ function SitesPage({ onNavigate }) {
     }
 
     if (sitesDashboard.labels?.length) {
-      const last = sitesDashboard.labels.length - 1
-      setStartIdx(0)
+      const { first, last } = defaultPeriodIndices(sitesDashboard.labels.length)
+      setStartIdx(first)
       setEndIdx(last)
     }
   }, [sitesDashboard, querySiteId, querySiteName, siteOptions])
+
+  const periodStart = Math.min(startIdx, endIdx)
+  const periodEnd = Math.max(startIdx, endIdx)
+  const chartWindow = useMemo(
+    () => visibleChartRange(periodStart, periodEnd, chartPan),
+    [periodStart, periodEnd, chartPan],
+  )
+  const { viewStart, viewEnd, maxPan, canScroll } = chartWindow
+
+  useEffect(() => {
+    setChartPan(Math.max(0, periodEnd - periodStart + 1 - MAX_CHART_WEEKS))
+  }, [periodStart, periodEnd])
 
   const selectedSite = useMemo(() => {
     if (!sitesDashboard || mode === 'all' || !siteId) return null
@@ -233,20 +246,6 @@ function SitesPage({ onNavigate }) {
     return matchingEntry ? aggregateHoursSeries([matchingEntry]) : []
   }, [selectedSite, sitesDashboard, siteId, mode])
 
-  const chartData = useMemo(() => {
-    if (!sitesDashboard?.labels) return [];
-    const labels = (sitesDashboard.labels || []).slice(startIdx, endIdx + 1);
-    return labels.map((label, index) => ({
-      name: label,
-      volume: siteVolumeData[startIdx + index],
-      heures: siteHoursData[startIdx + index],
-      consommation: siteConsumptionData[startIdx + index],
-    }));
-  }, [sitesDashboard, siteVolumeData, siteHoursData, siteConsumptionData, startIdx, endIdx]);
-
-  const siteVolumeStats = windowStats(siteVolumeData, startIdx, endIdx)
-  const siteConsumptionStats = windowStats(siteConsumptionData, startIdx, endIdx, { ignoreZeros: true })
-  const siteHoursStats = windowStats(siteHoursData, startIdx, endIdx, { ignoreZeros: true })
 
   const siteAutonomy = useMemo(() => {
     if (!sitesDashboard?.autonomyBySite || !siteId) return null
@@ -269,60 +268,12 @@ function SitesPage({ onNavigate }) {
       return {
         id: site.id,
         nom_site: site.nom_site,
-        volume: windowStats(volumeSeries, startIdx, endIdx),
-        consumption: windowStats(consumptionSeries, startIdx, endIdx, { ignoreZeros: true }),
-        hours: windowStats(hoursSeries, startIdx, endIdx, { ignoreZeros: true }),
+        volume: windowStats(volumeSeries, periodStart, periodEnd),
+        consumption: windowStats(consumptionSeries, periodStart, periodEnd, { ignoreZeros: true }),
+        hours: windowStats(hoursSeries, periodStart, periodEnd, { ignoreZeros: true }),
       }
     })
-  }, [sitesDashboard, startIdx, endIdx, siteId])
-
-<<<<<<< HEAD
-=======
-  useEffect(() => {
-    if (!window.Chart || !sitesDashboard || mode === 'all') return undefined
-    const charts = []
-    const labels = (sitesDashboard.labels || []).slice(startIdx, endIdx + 1)
-    const sliceSeries = (values = []) => values.slice(startIdx, endIdx + 1)
-    const pointRadius = seriesPointRadius(labels.length)
-    const createLineChart = (id, data, color, fill = false) => {
-      const ctx = document.getElementById(id)
-      if (!ctx) return
-      const chart = createChart(ctx, {
-        type: 'line',
-        data: {
-          labels,
-          datasets: [{
-            label: id,
-            data: sliceSeries(data),
-            borderColor: color,
-            backgroundColor: fill ? `${color}22` : 'transparent',
-            borderWidth: 3,
-            tension: 0.35,
-            fill,
-            pointRadius,
-            spanGaps: true,
-          }],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          spanGaps: true,
-          plugins: { legend: { display: false } },
-          scales: {
-            x: {
-              ticks: xAxisTicks(labels.length, chartPalette.text),
-              grid: { color: chartPalette.grid },
-            },
-            y: {
-              ticks: { color: chartPalette.text },
-              grid: { color: chartPalette.grid },
-            },
-          },
-        },
-      })
-      if (chart) charts.push(chart)
-    }
->>>>>>> d2b7279f27938bd4c7bf270e0c7bd8e4f533c608
+  }, [sitesDashboard, periodStart, periodEnd, siteId])
 
 
   if (!sitesDashboard) {
@@ -462,81 +413,7 @@ function SitesPage({ onNavigate }) {
                     <div><span>Total sur la période de la courbe</span><strong>{siteHoursStats.total.toFixed(1)} h</strong>{renderDelta(siteHoursStats)}</div>
                     <div><span>Delta horaire moyen</span><strong>{siteHoursStats.mean.toFixed(1)} h</strong>{renderMeanDelta(siteHoursStats)}</div>
                   </div>
-                  <div className="chart-box secondary-box">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
-                        <CartesianGrid stroke={chartPalette.grid} strokeDasharray="3 3" />
-                        <XAxis dataKey="name" stroke={chartPalette.text} />
-                        <YAxis stroke={chartPalette.text} unit="h" />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: chartPalette.tooltipBg,
-                            borderColor: chartPalette.tooltipBorder,
-                            color: chartPalette.tooltipBody,
-                          }}
-                          labelStyle={{ color: chartPalette.tooltipTitle }}
-                          formatter={(value) => [`${value.toLocaleString('fr-FR')} h`, 'Heures']}
-                        />
-                        <Line type="monotone" dataKey="heures" name="Heures" stroke="#3b82f6" strokeWidth={3} dot={false} activeDot={{ r: 8 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </article>
 
-                <article className="metric-panel site-metric-card">
-                  <span className="metric-label">Consommation</span>
-                  <h3>{selectedSite ? 'Consommation' : 'Consommation cumulée'}</h3>
-                  <div className="site-metric-stack">
-                    <div><span>Total sur la période de la courbe</span><strong>{siteConsumptionStats.total.toFixed(1)} L</strong>{renderDelta(siteConsumptionStats)}</div>
-                    <div><span>Consommation moyenne</span><strong>{siteConsumptionStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteConsumptionStats)}</div>
-                  </div>
-                  <div className="chart-box secondary-box">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
-                        <CartesianGrid stroke={chartPalette.grid} strokeDasharray="3 3" />
-                        <XAxis dataKey="name" stroke={chartPalette.text} />
-                        <YAxis stroke={chartPalette.text} unit="L" />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: chartPalette.tooltipBg,
-                            borderColor: chartPalette.tooltipBorder,
-                            color: chartPalette.tooltipBody,
-                          }}
-                          labelStyle={{ color: chartPalette.tooltipTitle }}
-                          formatter={(value) => [`${value.toLocaleString('fr-FR')} L`, 'Consommation']}
-                        />
-                        <Line type="monotone" dataKey="consommation" name="Consommation" stroke="#60a5fa" strokeWidth={3} dot={false} activeDot={{ r: 8 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
-                </article>
-
-                <article className="metric-panel site-metric-card">
-                  <span className="metric-label">Stock</span>
-                  <h3>{selectedSite ? 'Volume stock' : 'Volume stock cumulé'}</h3>
-                  <div className="site-metric-stack">
-                    <div><span>Stock semaine N (dernière valeur)</span><strong>{siteVolumeStats.latest.toFixed(1)} L</strong>{renderDelta(siteVolumeStats)}</div>
-                    <div><span>Volume moyen</span><strong>{siteVolumeStats.mean.toFixed(1)} L</strong>{renderMeanDelta(siteVolumeStats)}</div>
-                  </div>
-                  <div className="chart-box secondary-box">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <LineChart data={chartData} margin={{ top: 5, right: 20, left: -10, bottom: 5 }}>
-                        <CartesianGrid stroke={chartPalette.grid} strokeDasharray="3 3" />
-                        <XAxis dataKey="name" stroke={chartPalette.text} />
-                        <YAxis stroke={chartPalette.text} unit="L" />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: chartPalette.tooltipBg,
-                            borderColor: chartPalette.tooltipBorder,
-                            color: chartPalette.tooltipBody,
-                          }}
-                          labelStyle={{ color: chartPalette.tooltipTitle }}
-                          formatter={(value) => [`${value.toLocaleString('fr-FR')} L`, 'Volume']}
-                        />
-                        <Line type="monotone" dataKey="volume" name="Volume" stroke="#0b3d7a" strokeWidth={3} dot={false} activeDot={{ r: 8 }} />
-                      </LineChart>
-                    </ResponsiveContainer>
-                  </div>
                 </article>
               </div>
             </section>

@@ -6,7 +6,7 @@ import PageLoader from '../components/PageLoader.jsx'
 import PageEnter from '../components/PageEnter.jsx'
 import AnimatedContent from '../components/reactbits/AnimatedContent.jsx'
 import { useChartPalette } from '../hooks/useChartPalette.js'
-import { createChart, seriesPointRadius, xAxisTicks } from '../utils/chartAxis.js'
+import { createChart, defaultPeriodIndices, MAX_CHART_WEEKS, seriesPointRadius, toChartLabels, visibleChartRange, xAxisTicks } from '../utils/chartAxis.js'
 import { METRIC_LABELS } from '../utils/format.js'
 
 const renderDelta = (metric, suffix = '') => {
@@ -38,6 +38,7 @@ function CuvesPage({ onNavigate }) {
   const [loadError, setLoadError] = useState('')
   const [filtering, setFiltering] = useState(false)
   const [initialLoading, setInitialLoading] = useState(true)
+  const [chartPan, setChartPan] = useState(0)
   const filterSeq = useRef(0)
 
   const reportChoices = useMemo(() => (cuvesData?.rapport_choices || []), [cuvesData])
@@ -53,8 +54,17 @@ function CuvesPage({ onNavigate }) {
   }, [rapportFin, reportChoices])
   const startIndex = Math.min(rapportDebutIndex, rapportFinIndex)
   const endIndex = Math.max(rapportDebutIndex, rapportFinIndex)
+  const chartWindow = useMemo(
+    () => visibleChartRange(startIndex, endIndex, chartPan),
+    [startIndex, endIndex, chartPan],
+  )
+  const { viewStart, viewEnd, maxPan, canScroll } = chartWindow
 
-  const loadCuvesData = async (queryParams = '', { isFilter = false, preserveSiteSelection = false } = {}) => {
+  useEffect(() => {
+    setChartPan(Math.max(0, endIndex - startIndex + 1 - MAX_CHART_WEEKS))
+  }, [startIndex, endIndex])
+
+  const loadCuvesData = async (queryParams = '', { isFilter = false, preserveSiteSelection = false, preservePeriod = false } = {}) => {
     const seq = ++filterSeq.current
     try {
       setLoadError('')
@@ -62,16 +72,25 @@ function CuvesPage({ onNavigate }) {
       const data = await apiFetch(`/api/v1/dashboard/cuves${queryParams ? `?${queryParams}` : ''}`)
       if (seq !== filterSeq.current) return
       setCuvesData(data)
-      const nextDebut = data.selected_rapport_debut != null
-        ? String(data.selected_rapport_debut)
-        : String(data.rapport_choices?.[0]?.id ?? '')
-      const nextFin = data.selected_rapport_fin != null
-        ? String(data.selected_rapport_fin)
-        : String(data.rapport_choices?.[data.rapport_choices.length - 1]?.id ?? '')
-      const nextSite = data.selected_site_id != null ? String(data.selected_site_id) : ''
-      setRapportDebut(nextDebut)
-      setRapportFin(nextFin)
+      const choices = data.rapport_choices || []
+      if (!preservePeriod) {
+        if (queryParams && (queryParams.includes('rapport_debut') || queryParams.includes('rapport_fin'))) {
+          const nextDebut = data.selected_rapport_debut != null
+            ? String(data.selected_rapport_debut)
+            : String(choices[0]?.id ?? '')
+          const nextFin = data.selected_rapport_fin != null
+            ? String(data.selected_rapport_fin)
+            : String(choices[choices.length - 1]?.id ?? '')
+          setRapportDebut(nextDebut)
+          setRapportFin(nextFin)
+        } else {
+          const { first, last } = defaultPeriodIndices(choices.length)
+          setRapportDebut(String(choices[first]?.id ?? ''))
+          setRapportFin(String(choices[last]?.id ?? ''))
+        }
+      }
       if (!preserveSiteSelection) {
+        const nextSite = data.selected_site_id != null ? String(data.selected_site_id) : ''
         setSiteId(nextSite)
       }
     } catch (error) {
@@ -104,7 +123,11 @@ function CuvesPage({ onNavigate }) {
     if (debut) params.set('rapport_debut', debut)
     if (fin) params.set('rapport_fin', fin)
     if (site) params.set('site_id', site)
-    await loadCuvesData(params.toString(), { isFilter: true, preserveSiteSelection: true })
+    await loadCuvesData(params.toString(), {
+      isFilter: true,
+      preserveSiteSelection: true,
+      preservePeriod: true,
+    })
   }
 
   useEffect(() => {
@@ -113,37 +136,14 @@ function CuvesPage({ onNavigate }) {
     }
 
     const charts = []
-    const labels = (cuvesData.labels || []).slice(startIndex, endIndex + 1)
+    const fullLabels = cuvesData.labels || []
+    const labels = toChartLabels(fullLabels.slice(viewStart, viewEnd + 1))
+    const fullLabelsWindow = fullLabels.slice(viewStart, viewEnd + 1)
     const pointRadius = seriesPointRadius(labels.length)
     const baseOptions = (unit = 'L') => ({
       responsive: true,
       maintainAspectRatio: false,
-<<<<<<< HEAD
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          enabled: true,
-          mode: 'index',
-          intersect: false,
-          backgroundColor: chartPalette.tooltipBg,
-          titleColor: chartPalette.tooltipTitle,
-          bodyColor: chartPalette.tooltipBody,
-          borderColor: chartPalette.tooltipBorder,
-          borderWidth: 1,
-          padding: 10,
-          callbacks: {
-            title: (context) => `Le ${context[0].label}`,
-            label: (context) => {
-              const value = context.parsed.y
-              return `${context.dataset.label}: ${value.toLocaleString('fr-FR')} ${unit}`
-            },
-          },
-        },
-      },
-=======
-      spanGaps: true,
-      plugins: { legend: { display: false } },
->>>>>>> d2b7279f27938bd4c7bf270e0c7bd8e4f533c608
+
       scales: {
         x: {
           ticks: xAxisTicks(labels.length, chartPalette.text),
@@ -164,24 +164,11 @@ function CuvesPage({ onNavigate }) {
       },
     })
 
-    const sliceSeries = (values = []) => values.slice(startIndex, endIndex + 1)
+    const sliceSeries = (values = []) => values.slice(viewStart, viewEnd + 1)
     const makeChart = (id, block, unit = 'L') => {
       const target = document.getElementById(id)
       if (!target) return
-<<<<<<< HEAD
-      const ctx = target.getContext('2d')
 
-      // Création du dégradé
-      const gradient = ctx.createLinearGradient(0, 0, 0, target.clientHeight * 1.5)
-      const baseColor = block.color || '#0b3d7a'
-      gradient.addColorStop(0, `${baseColor}50`) // Plus opaque en haut
-      gradient.addColorStop(0.6, `${baseColor}10`) // Plus transparent vers le bas
-      gradient.addColorStop(1, `${baseColor}00`)
-
-      const chart = new window.Chart(target, {
-=======
-      const chart = createChart(target, {
->>>>>>> dec564dbeffc78db0c51f62e4433fa637cb8c6af
         type: 'line',
         data: {
           labels,
@@ -193,20 +180,7 @@ function CuvesPage({ onNavigate }) {
             borderWidth: 3,
             tension: 0.3,
             fill: true,
-<<<<<<< HEAD
-<<<<<<< HEAD
-            pointRadius: 0,
-            pointBackgroundColor: baseColor,
-            pointHoverRadius: 6,
-            pointHoverBorderWidth: 2,
-            pointHoverBackgroundColor: '#fff',
-=======
-            pointRadius: 4,
-=======
-            pointRadius,
->>>>>>> dec564dbeffc78db0c51f62e4433fa637cb8c6af
-            spanGaps: true,
->>>>>>> d2b7279f27938bd4c7bf270e0c7bd8e4f533c608
+
           }],
         },
         options: baseOptions(unit),
@@ -217,8 +191,20 @@ function CuvesPage({ onNavigate }) {
     ;(cuvesData.principal_blocks || []).forEach((block) => makeChart(`chart-cuve-principale-${block.id}`, block, 'L'))
     ;(cuvesData.journalier_blocks || []).forEach((block) => makeChart(`chart-cuve-journaliere-${block.id}`, block, 'L'))
 
-    return () => charts.forEach((chart) => chart.destroy())
-  }, [chartPalette, cuvesData, startIndex, endIndex])
+    const onWheel = (event) => {
+      if (!canScroll) return
+      event.preventDefault()
+      const step = event.deltaY > 0 ? 1 : -1
+      setChartPan((prev) => Math.min(maxPan, Math.max(0, prev + step)))
+    }
+    const chartBoxes = document.querySelectorAll('.chart-box')
+    chartBoxes.forEach((box) => box.addEventListener('wheel', onWheel, { passive: false }))
+
+    return () => {
+      charts.forEach((chart) => chart.destroy())
+      chartBoxes.forEach((box) => box.removeEventListener('wheel', onWheel))
+    }
+  }, [chartPalette, cuvesData, viewStart, viewEnd, canScroll, maxPan])
 
   if (initialLoading || !cuvesData) {
     return (
@@ -384,7 +370,7 @@ function CuvesPage({ onNavigate }) {
                   </div>
                   <div className="chart-card">
                     <span className="curve-title">Courbe volume stock</span>
-                    <div className="chart-box small-box"><canvas id={`chart-cuve-principale-${block.id}`} /></div>
+                    <div className={`chart-box small-box${canScroll ? ' is-scrollable' : ''}`}><canvas id={`chart-cuve-principale-${block.id}`} /></div>
                   </div>
                 </article>
               </AnimatedContent>
@@ -458,7 +444,7 @@ function CuvesPage({ onNavigate }) {
                   </div>
                   <div className="chart-card">
                     <span className="curve-title">Courbe volume stock</span>
-                    <div className="chart-box small-box"><canvas id={`chart-cuve-journaliere-${block.id}`} /></div>
+                    <div className={`chart-box small-box${canScroll ? ' is-scrollable' : ''}`}><canvas id={`chart-cuve-journaliere-${block.id}`} /></div>
                   </div>
                 </article>
               </AnimatedContent>

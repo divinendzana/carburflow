@@ -552,7 +552,7 @@ class CalculsSeriesTestCase(TestCase):
 
 
 class RapportDateOrderTestCase(TestCase):
-    def test_labels_are_chronological_with_year(self):
+    def test_labels_are_chronological_start_date(self):
         from dashboard.utils import calculs as calc
 
         Rapport.objects.create(date_debut=date(2026, 7, 13), date_fin=date(2026, 7, 17))
@@ -565,13 +565,13 @@ class RapportDateOrderTestCase(TestCase):
         self.assertEqual(
             labels,
             [
-                '22/06/2026 → 26/06/2026',
-                '13/07/2026 → 17/07/2026',
-                '03/08/2026 → 09/08/2026',
+                '22/06/2026',
+                '13/07/2026',
+                '03/08/2026',
             ],
         )
 
-    def test_template_writes_native_excel_dates(self):
+    def test_template_writes_text_french_dates(self):
         from openpyxl import load_workbook
         from dashboard.rapport_pipeline import generate_rapport_template_xlsx
         from dashboard.norme import _parse_date
@@ -582,15 +582,40 @@ class RapportDateOrderTestCase(TestCase):
         # Ligne 4 = date_debut, ligne 5 = date_fin (après titre + vide + en-têtes)
         self.assertEqual(_parse_date(ws.cell(row=4, column=2).value), date(2026, 8, 3))
         self.assertEqual(_parse_date(ws.cell(row=5, column=2).value), date(2026, 8, 9))
-        self.assertEqual(ws.cell(row=4, column=2).number_format, 'DD/MM/YYYY')
+        self.assertEqual(ws.cell(row=4, column=2).value, '03/08/2026')
+        self.assertEqual(ws.cell(row=4, column=2).number_format, '@')
 
-    def test_long_period_is_rejected(self):
+    def test_excel_us_swapped_debut_is_auto_corrected(self):
+        """03/08 saisi (3 août) mais Excel US a stocké 08/03 (8 mars)."""
         from dashboard.rapport_pipeline import analyze_rapport_rows
 
         analysis = analyze_rapport_rows([
             {
-                'date_debut': '08/03/2026',
-                'date_fin': '11/08/2026',
+                'date_debut': date(2026, 3, 8),  # lu US
+                'date_fin': date(2026, 8, 11),   # correct 11 août
+                'id_cuve_principale': 'SITE AKWA',
+                'id_cuve_journaliere': 'CJ AKWA 1',
+                'id_groupe': '1',
+                'quantités_cuve_principale': 1000,
+                'quantite_cuve_journaliere': 100,
+                'depotage': 0,
+                'compteur_horaire': 10,
+                'état_fonctionnement': 'F',
+            }
+        ])
+        self.assertEqual(analysis.date_debut, '2026-08-03')
+        self.assertEqual(analysis.date_fin, '2026-08-11')
+        self.assertFalse(any('trop longue' in (i.message or '') for i in analysis.issues))
+        self.assertTrue(any('réinterprétées' in (i.message or '') for i in analysis.issues))
+
+    def test_long_period_is_rejected(self):
+        from dashboard.rapport_pipeline import analyze_rapport_rows
+
+        # Période réellement trop longue, non récupérable par échange jj/mm
+        analysis = analyze_rapport_rows([
+            {
+                'date_debut': '01/01/2026',
+                'date_fin': '01/08/2026',
                 'id_cuve_principale': 'SITE AKWA',
                 'id_cuve_journaliere': 'CJ AKWA 1',
                 'id_groupe': '1',
